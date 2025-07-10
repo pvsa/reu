@@ -9,26 +9,42 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 from reportlab.lib.utils import ImageReader
 
 def ensure_directory_exists(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
+def read_default_config():
+    file_path = os.path.join('conf', 'defaults.conf')
+    try:
+        with open(file_path, 'r') as f:
+            line = f.readline().strip()
+            sender_email = line
+            return sender_email
+    except FileNotFoundError:
+        print(f"Default config file not found: {file_path}")
+        return None
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
+
 def read_user_data(username):
     file_path = os.path.join('conf', f"{username}.conf")
     try:
         with open(file_path, 'r') as f:
             line = f.readline().strip()
-            url, password, email = line.split(',')
-            return url, password, email
+            url, password, email, smtp_server, smtp_port = line.split(',')
+            return url, password, email, smtp_server, smtp_port
     except FileNotFoundError:
         print(f"User data file not found: {file_path}")
-        return None, None, None
+        return None, None, None, None, None
     except Exception as e:
         print(f"An error occurred: {e}")
-        return None, None, None
+        return None, None, None, None, None
 
 def download_icalendar_file(url, username, password):
     response = requests.get(url, auth=(username, password))
@@ -76,41 +92,48 @@ def filter_events_by_month_and_year(cal, month, year):
 def generate_invoice(customer_code, events, username, month, year):
     ensure_directory_exists('archive')
     file_name = os.path.join('archive', f"{customer_code}_Abrechnung_{month}_{year}.pdf")
-    c = canvas.Canvas(file_name, pagesize=letter)
-    width, height = letter
+    doc = SimpleDocTemplate(file_name, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
 
     # Logo einfügen
     logo_path = "logo.png"
     if os.path.exists(logo_path):
         logo = ImageReader(logo_path)
-        c.drawImage(logo, 50, height - 100, width=100, height=50, preserveAspectRatio=True)
+        story.append(logo)
 
     # Titel setzen
     title = f"{customer_code} Abrechnung {month}/{year}"
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(200, height - 60, title)
+    story.append(Paragraph(title, styles['Title']))
+    story.append(Spacer(1, 12))
 
-    # Überschrift im PDF
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(100, height - 100, title)
-
-    # Weitere Informationen
-    c.setFont("Helvetica", 12)
-    c.drawString(100, height - 130, f"Generated for User: {username}")
-    c.drawString(100, height - 150, "Events:")
-
-    y_position = height - 170
+    # Tabelle für Events
+    data = [["Beschreibung", "Datum", "Von", "Bis", "Dauer"]]
     for event in events:
-        summary = event.get('summary')
-        start = event.get('dtstart').dt
-        end = event.get('dtend').dt
-        c.drawString(120, y_position, f"{start} to {end}: {summary}")
-        y_position -= 20
+        summary = str(event.get('summary'))
+        start = ensure_datetime(event.get('dtstart').dt)
+        end = ensure_datetime(event.get('dtend').dt)
+        duration = end - start
+        data.append([summary, start.date(), start.time(), end.time(), str(duration)])
 
-    c.save()
+    table = Table(data)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+
+    story.append(table)
+    doc.build(story)
+    print(f"Invoice generated: {file_name}")
     return file_name
 
-def send_email(sender_email, recipient_email, subject, body, attachment_path):
+def send_email(sender_email, recipient_email, subject, body, attachment_path, smtp_server, smtp_port):
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = recipient_email
@@ -132,7 +155,7 @@ def send_email(sender_email, recipient_email, subject, body, attachment_path):
     msg.attach(part)
 
     try:
-        server = smtplib.SMTP('mail.pilarkto.net', 587)
+        server = smtplib.SMTP(smtp_server, int(smtp_port))
         server.starttls()
         text = msg.as_string()
         server.sendmail(sender_email, recipient_email, text)
@@ -142,8 +165,13 @@ def send_email(sender_email, recipient_email, subject, body, attachment_path):
         print(f"Failed to send email: {e}")
 
 def main(username, month, year):
-    url, password, email = read_user_data(username)
-    if not url or not password or not email:
+    sender_email = read_default_config()
+    if not sender_email:
+        print("Default sender email not found.")
+        return
+
+    url, password, email, smtp_server, smtp_port = read_user_data(username)
+    if not url or not password or not email or not smtp_server or not smtp_port:
         print("User data not found.")
         return
 
@@ -161,13 +189,11 @@ def main(username, month, year):
                     customer_events[customer_code] = []
                 customer_events[customer_code].append(event)
 
-    sender_email = "your_email@example.com"  # Ersetzen Sie durch Ihre E-Mail-Adresse
-
     for customer_code, events in customer_events.items():
         pdf_file = generate_invoice(customer_code, events, username, month, year)
         subject = f"Invoice for {customer_code} - {month}/{year}"
         body = f"Please find attached the invoice for {customer_code} for the period {month}/{year}."
-        send_email(sender_email, email, subject, body, pdf_file)
+        send_email(sender_email, email, subject, body, pdf_file, smtp_server, smtp_port)
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:

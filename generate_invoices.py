@@ -1,6 +1,7 @@
 import icalendar
 import sys
 import os
+import re
 import requests
 import smtplib
 from datetime import datetime, timedelta, date
@@ -182,17 +183,17 @@ def main(username, month, year):
     customer_events = {}
     for event in filtered_events:
         description = str(event.get('description'))
-        if ':' in description:
-            customer_code = description.split(':')[0].strip()
-            if customer_code.isupper() and len(customer_code) == 3:
-                if customer_code not in customer_events:
-                    customer_events[customer_code] = []
-                customer_events[customer_code].append(event)
+        match = re.match(r'^[A-Z]{3}:', description)
+        if match:
+            customer_code = match.group()[:-1]
+            if customer_code not in customer_events:
+                customer_events[customer_code] = []
+            customer_events[customer_code].append(event)
 
     for customer_code, events in customer_events.items():
         pdf_file = generate_invoice(customer_code, events, username, month, year)
-        subject = f"Invoice for {customer_code} - {month}/{year}"
-        body = f"Please find attached the invoice for {customer_code} for the period {month}/{year}."
+        subject = f"Abrechnung für {customer_code} - {month}/{year}"
+        body = f"Anbei finden Sie die Abrechnung für {customer_code} für den Zeitraum {month}/{year}."
         send_email(sender_email, email, subject, body, pdf_file, smtp_server, smtp_port)
 
 if __name__ == "__main__":

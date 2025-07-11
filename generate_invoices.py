@@ -4,6 +4,7 @@ import os
 import re
 import requests
 import smtplib
+import pytz
 from datetime import datetime, timedelta, date
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -68,6 +69,11 @@ def ensure_datetime(d):
         return datetime.combine(d, datetime.min.time())
     return d
 
+def convert_to_local_time(dt):
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(pytz.timezone('Europe/Vienna')).replace(tzinfo=None)
+
 def filter_events_by_month_and_year(cal, month, year):
     filtered_events = []
     start_date = datetime(year, month, 1)
@@ -81,10 +87,8 @@ def filter_events_by_month_and_year(cal, month, year):
             event_start = ensure_datetime(component.get('dtstart').dt)
             event_end = ensure_datetime(component.get('dtend').dt)
 
-            if isinstance(event_start, datetime) and event_start.tzinfo is not None:
-                event_start = event_start.replace(tzinfo=None)
-            if isinstance(event_end, datetime) and event_end.tzinfo is not None:
-                event_end = event_end.replace(tzinfo=None)
+            event_start = convert_to_local_time(event_start)
+            event_end = convert_to_local_time(event_end)
 
             if start_date <= event_start <= end_date or start_date <= event_end <= end_date:
                 filtered_events.append(component)
@@ -112,8 +116,8 @@ def generate_invoice(customer_code, events, username, month, year):
     data = [["Beschreibung", "Datum", "Von", "Bis", "Dauer"]]
     for event in events:
         summary = str(event.get('summary'))
-        start = ensure_datetime(event.get('dtstart').dt)
-        end = ensure_datetime(event.get('dtend').dt)
+        start = convert_to_local_time(ensure_datetime(event.get('dtstart').dt))
+        end = convert_to_local_time(ensure_datetime(event.get('dtend').dt))
         duration = end - start
         data.append([summary, start.date(), start.time(), end.time(), str(duration)])
 

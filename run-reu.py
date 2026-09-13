@@ -1,519 +1,327 @@
 #!/usr/bin/env python3
+"""REU – CLI-Dispatch.
+
+Aufruf:
+    ./run-reu.py <user> <month> <year> --hours
+    ./run-reu.py <user> <month> <year> --expenses
+    ./run-reu.py <user> <month> <year> --invoice
+    ./run-reu.py <user> <month> <year> --full [--dry-run]
+    ./run-reu.py <user> --journal <year>
+
+Ohne Action-Flag wird nur die Hilfe angezeigt (keine Ausführung).
 """
-iCal zu PDF Rechnungsgenerator
-Erstellt monatliche Rechnungen aus iCal-Dateien für verschiedene Kunden
-"""
+from __future__ import annotations
 
 import argparse
-import configparser
-import os
+import datetime as _dt
 import sys
-import re
-from datetime import datetime, timedelta
-from collections import defaultdict
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
-from email.mime.text import MIMEText
-import tempfile
-import pytz
-from zoneinfo import ZoneInfo
+from decimal import Decimal
+from pathlib import Path
 
-# Externe Bibliotheken (müssen installiert werden)
-try:
-    import requests
-    from icalendar import Calendar, Event
-    from reportlab.lib.pagesizes import A4
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.units import cm
-    from reportlab.lib.colors import black
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-except ImportError as e:
-    print(f"Fehler beim Importieren der Bibliotheken: {e}")
-    print("Bitte installieren Sie die erforderlichen Pakete:")
-    print("pip install requests icalendar reportlab")
-    sys.exit(1)
+from reu import (
+    config as config_mod,
+    expenses as expenses_mod,
+    ical as ical_mod,
+    invoice as invoice_mod,
+    kunden as kunden_mod,
+    smtp as smtp_mod,
+    state as state_mod,
+    zugferd as zugferd_mod,
+)
+from reu.config import Config
+from reu.kunden import Kunde
+from reu.util import euro, leistungszeitraum_iso, letzter_des_monats
 
 
-class InvoiceGenerator:
-    def __init__(self, config_file, username, month, year):
-        self.username = username
-        self.month = month
-        self.year = year
-        self.config = self.load_config(config_file)
-        self.local_tz = ZoneInfo("Europe/Berlin")  # Deutsche Zeitzone
-        
-    def load_config(self, config_file):
-        """Lädt die Konfigurationsdatei für den Benutzer"""
-        config = configparser.ConfigParser()
+def _ausgabe_verzeichnis(cfg: Config, dry_run: bool) -> Path:
+    verz = cfg.ausgabe_verz / ("dry-run" if dry_run else "final")
+    verz.mkdir(parents=True, exist_ok=True)
+    return verz
+
+
+def _lade_kunden(cfg: Config) -> dict[str, Kunde]:
+    return kunden_mod.lade_kunden(cfg.kunden.datei, cfg.kunden.blatt)
+
+
+def _drucke_tabelle(zeilen: list[list[str]], kopf: list[str]) -> None:
+    breiten = [len(kopf)]
+    matrix = [kopf] + zeilen
+    spalten = len(kopf)
+    breiten = [max(len(str(r[i])) for r in matrix if i < len(r)) for i in range(spalten)]
+    def fmt(r):
+        return "  ".join(str(c).ljust(breiten[i]) for i, c in enumerate(r[:spalten]))
+    print(fmt(kopf))
+    print("-" * (sum(breiten) + 2 * (spalten - 1)))
+    for r in zeilen:
+        print(fmt(r))
+
+
+def cmd_hours(cfg: Config, month: int, year: int) -> int:
+    kunden = _lade_kunden(cfg)
+    stunden = ical_mod.lade_stunden(cfg.ical, year, month)
+    if not stunden:
+        print(f"Keine Termine im Leistungszeitraum {leistungszeitraum_iso(year, month)} gefunden.")
+        return 0
+    print(f"Stunden {leistungszeitraum_iso(year, month)}:")
+    for k in sorted(stunden):
+        kunde = kunden.get(k)
+        name = kunde.name if kunde else "(unbekannt)"
+        total = ical_mod.stunden_summe(stunden[k])
+        print(f"\n=== {k} – {name} ({euro(kunde.stundensatz)}/h) ===")
+        for e in stunden[k]:
+            print(f"  {e['datum'].isoformat()}  {e['dauer_h']:>6} h  {e['beschreibung']}")
+        print(f"  Summe: {total} h  → Netto {euro(total * kunde.stundensatz) if kunde else '?'}")
+    return 0
+
+
+def cmd_expenses(cfg: Config, month: int, year: int) -> int:
+    kunden = _lade_kunden(cfg)
+    erg = expenses_mod.lade_auslagen(cfg.auslagen, year, month, set(kunden))
+    print(f"Auslagen {leistungszeitraum_iso(year, month)} – Freigabe: {'JA' if erg['freigegeben'] else 'NEIN (Entwurf)'}")
+    for k in sorted(erg["auslagen"]):
+        kunde = kunden.get(k, None)
+        name = kunde.name if kunde else "(unbekannt)"
+        zeilen = erg["auslagen"][k]
+        print(f"\n=== {k} – {name} ===")
+        for z in zeilen:
+            print(f"  {z['datum']}  {z['belegnr']:>10}  {z['art']:<12}  {z['bezeichnung']:<25}  {euro(z['betrag_netto'])}")
+        print(f"  Summe Netto: {euro(expenses_mod.auslagen_summe(zeilen))}")
+    return 0
+
+
+def _erzeuge_rechnung(
+    cfg: Config,
+    kunde: Kunde,
+    stunden: list[dict],
+    auslagen: list[dict],
+    month: int,
+    year: int,
+    state: state_mod.State,
+    dry_run: bool,
+    freigegeben: bool,
+) -> dict:
+    re_datum = letzter_des_monats(year, month)
+    faelligkeit = re_datum + _dt.timedelta(days=cfg.erechnung.zahlungsziel_tage)
+    # entwurf = keine finale Rechnung (kein XML im PDF-Hinweis, keine echte Re-Nr).
+    # Im Dry-Run wird trotzdem das ZUGFeRD-XML eingebettet, wenn Meta=yes,
+    # damit die PDF inkl. XML geprüft werden kann – aber mit ENTWURF-Re-Nr.
+    entwurf = not freigegeben
+    renr = state_mod.naechste_renr(state, year, dry_run=dry_run)
+
+    out_verz = _ausgabe_verzeichnis(cfg, dry_run)
+    basis_name = f"{kunde.kunde}_Rechnung_{renr}.pdf"
+    pdf_pfad = out_verz / basis_name
+
+    summen = invoice_mod.erzeuge_rechnung_pdf(
+        cfg=cfg,
+        kunde=kunde,
+        stunden=stunden,
+        auslagen=auslagen,
+        year=year,
+        month=month,
+        renr=renr,
+        re_datum=re_datum,
+        faelligkeit=faelligkeit,
+        entwurf=entwurf,
+        freigegeben=freigegeben,
+        ausgabe_pfad=pdf_pfad,
+    )
+
+    final_pdf = pdf_pfad
+    if freigegeben:
+        # ZUGFeRD-XML einbetten (auch im Dry-Run, damit die PDF prüfbar ist)
+        final_pdf = out_verz / f"{kunde.kunde}_Rechnung_{renr}_ZUGFeRD.pdf"
+        zugferd_mod.erzeuge_zugferd_pdf(
+            pdf_pfad=pdf_pfad,
+            ausgabe_pfad=final_pdf,
+            cfg=cfg,
+            kunde=kunde,
+            stunden=stunden,
+            auslagen=auslagen,
+            summen=summen,
+            renr=renr,
+            re_datum=re_datum,
+            faelligkeit=faelligkeit,
+            year=year,
+            month=month,
+        )
+        pdf_pfad.unlink(missing_ok=True)
+    else:
+        # Entwurf (Meta!A1 != yes): keine ZUGFeRD-Einbettung
+        pass
+
+    state_mod.buche(
+        state,
+        renr=renr,
+        kunde=kunde.kunde,
+        datum=re_datum,
+        leistungszeitraum=leistungszeitraum_iso(year, month),
+        netto=summen["netto"],
+        ust=summen["ust"],
+        brutto=summen["brutto"],
+        entwurf=entwurf,
+        dry_run=dry_run,
+        pfad=cfg.state_pfad,
+    )
+    return {"kunde": kunde.kunde, "renr": renr, "pdf": str(final_pdf), "summen": summen, "entwurf": entwurf}
+
+
+def cmd_invoice(cfg: Config, month: int, year: int, *, dry_run: bool, nur_kunde: str | None) -> int:
+    kunden = _lade_kunden(cfg)
+    stunden_alle = ical_mod.lade_stunden(cfg.ical, year, month)
+    auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, year, month, set(kunden))
+    # freigegeben = Meta!A1 == 'yes'. Im Dry-Run wird die ZUGFeRD-PDF trotzdem
+    # erzeugt (zum Prüfen); Re-Nr/State/Versand steuert dry_run separat.
+    freigegeben = auslagen_erg["freigegeben"]
+    state = state_mod.lade_state(cfg.state_pfad)
+
+    kunden_keys = sorted(set(stunden_alle) | set(auslagen_erg["auslagen"]))
+    if nur_kunde:
+        kunden_keys = [k for k in kunden_keys if k == nur_kunde]
+    if not kunden_keys:
+        print("Keine abrechenbaren Kunden für diesen Zeitraum (weder Stunden noch Auslagen).")
+        return 0
+
+    ergebnisse = []
+    for k in kunden_keys:
+        kunde = kunden.get(k)
+        if kunde is None:
+            print(f"Warnung: Kunde '{k}' nicht in kunden.ods – übersprungen.")
+            continue
+        stunden = stunden_alle.get(k, [])
+        auslagen = auslagen_erg["auslagen"].get(k, [])
+        if not stunden and not auslagen:
+            continue
+        erg = _erzeuge_rechnung(cfg, kunde, stunden, auslagen, month, year, state, dry_run, freigegeben)
+        ergebnisse.append(erg)
+        print(f"{'ENTWURF ' if erg['entwurf'] else 'FINALE  '}{k}: {erg['renr']}  Netto {euro(erg['summen']['netto'])}  Brutto {euro(erg['summen']['brutto'])}  → {erg['pdf']}")
+
+    if dry_run:
+        print("\nDRY RUN — keine E-Mails versendet, keine Re-Nr vergeben, kein State geschrieben.")
+    return 0
+
+
+def cmd_full(cfg: Config, month: int, year: int, *, dry_run: bool, nur_kunde: str | None) -> int:
+    rc = cmd_invoice(cfg, month, year, dry_run=dry_run, nur_kunde=nur_kunde)
+    if dry_run:
+        return rc
+    # Versand nur im echten Lauf
+    kunden = _lade_kunden(cfg)
+    state = state_mod.lade_state(cfg.state_pfad)
+    out_verz = _ausgabe_verzeichnis(cfg, dry_run=False)
+    # Neueste Buchungen dieses Laufs versenden: anhand Re-Nr in State
+    for b in state.buchungen:
+        if b.entwurf:
+            continue
+        if not b.leistungszeitraum == leistungszeitraum_iso(year, month):
+            continue
+        pdf_name = f"{b.kunde}_Rechnung_{b.renr}_ZUGFeRD.pdf"
+        pdf_pfad = out_verz / pdf_name
+        if not pdf_pfad.is_file():
+            print(f"Warnung: finale PDF für Versand nicht gefunden: {pdf_pfad}")
+            continue
+        kunde = kunden.get(b.kunde)
+        betreff = f"Rechnung {b.renr} – {kunde.name if kunde else b.kunde}"
+        text = (
+            f"Sehr geehrte Damen und Herren,\n\n"
+            f"anbei erhalten Sie unsere Rechnung {b.renr} für den Leistungszeitraum "
+            f"{b.leistungszeitraum} über einen Gesamtbetrag von {euro(Decimal(b.brutto))}.\n\n"
+            f"Diese Rechnung enthält eine elektronische Rechnung gem. EN 16931 (ZUGFeRD).\n\n"
+            f"Mit freundlichen Grüßen\n{cfg.leistender.name}\n"
+        )
         try:
-            config.read(config_file)
-            return config
-        except Exception as e:
-            print(f"Fehler beim Laden der Konfiguration: {e}")
-            sys.exit(1)
-    
-    def download_ical(self):
-        """Lädt die iCal-Datei von der konfigurierten URL herunter"""
+            smtp_mod.sende_rechnung(
+                conf=cfg.smtp,
+                empfaenger=None,
+                pdf_pfad=pdf_pfad,
+                betreff=betreff,
+                text=text,
+                dry_run=False,
+            )
+            print(f"Versendet: {b.renr} an {cfg.smtp.recipient_email}")
+        except smtp_mod.SmtpError as exc:
+            print(f"FEHLER beim Versand {b.renr}: {exc}")
+    return rc
+
+
+def cmd_journal(cfg: Config, year: int) -> int:
+    state = state_mod.lade_state(cfg.state_pfad)
+    zeilen = state_mod.journal_zeilen(state)
+    if not zeilen:
+        print(f"Keine Buchungen im State ({cfg.state_pfad}).")
+        return 0
+    if year:
+        zeilen = [z for z in zeilen if z["datum"].startswith(str(year))]
+    kopf = ["ReNr", "Datum", "Kunde", "LZ", "Netto", "USt", "Brutto", "Status"]
+    tab = [[z["renr"], z["datum"], z["kunde"], z["leistungszeitraum"],
+            z["netto"], z["ust"], z["brutto"], z["status"]] for z in zeilen]
+    _drucke_tabelle(tab, kopf)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="run-reu.py",
+        description="REU – Rechnungserstellung (Stunden + Auslagen + ZUGFeRD).",
+    )
+    p.add_argument("user", help="Konfigurationsname, z.B. alice")
+    p.add_argument("month", nargs="?", type=int, help="Monat (1-12)")
+    p.add_argument("year", nargs="?", type=int, help="Jahr (z.B. 2025)")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--hours", action="store_true", help="Nur Stunden aus iCal anzeigen")
+    g.add_argument("--expenses", action="store_true", help="Nur Auslagen aus ODS prüfen")
+    g.add_argument("--invoice", action="store_true", help="Rechnung(en) erzeugen (kein Versand)")
+    g.add_argument("--full", action="store_true", help="Rechnung + ZUGFeRD + Versand (finale)")
+    g.add_argument("--journal", action="store_true", help="Rechnungsübersicht aus State")
+    p.add_argument("--dry-run", action="store_true",
+                   help="PDF/XML erzeugen, aber kein Versand, keine Re-Nr, kein State")
+    p.add_argument("--kunde", help="Nur diesen Kunden verarbeiten (Kürzel aus kunden.ods)")
+    p.add_argument("--journal-year", type=int, dest="jyear",
+                   help="Jahr-Filter für --journal")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    hat_action = any([args.hours, args.expenses, args.invoice, args.full, args.journal])
+    if not hat_action:
+        parser.print_help()
+        return 0
+
+    if args.journal:
         try:
-            url = self.config['ical']['url']
-            username = self.config['ical']['username']
-            password = self.config['ical']['password']
-            
-            # Verschiedene Authentifizierungsmethoden versuchen
-            auth_method = self.config.get('ical', 'auth_method', fallback='basic')
-            
-            # Konfigurierbares Timeout (Standard: 60 Sekunden)
-            timeout = int(self.config.get('ical', 'timeout', fallback='60'))
-            
-            # Retry-Logik
-            max_retries = int(self.config.get('ical', 'max_retries', fallback='3'))
-            retry_delay = int(self.config.get('ical', 'retry_delay', fallback='5'))
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            print(f"Verbinde zu: {url}")
-            print(f"Authentifizierungsmethode: {auth_method}")
-            print(f"Timeout: {timeout} Sekunden")
-            
-            for attempt in range(max_retries):
-                try:
-                    print(f"Versuch {attempt + 1}/{max_retries}...")
-                    
-                    if auth_method.lower() == 'basic':
-                        # Standard HTTP Basic Auth
-                        response = requests.get(url, auth=(username, password), headers=headers, timeout=timeout)
-                    elif auth_method.lower() == 'digest':
-                        # HTTP Digest Auth
-                        from requests.auth import HTTPDigestAuth
-                        response = requests.get(url, auth=HTTPDigestAuth(username, password), headers=headers, timeout=timeout)
-                    elif auth_method.lower() == 'token':
-                        # Token-basierte Authentifizierung (z.B. für CalDAV)
-                        headers['Authorization'] = f'Bearer {password}'
-                        response = requests.get(url, headers=headers, timeout=timeout)
-                    elif auth_method.lower() == 'url_params':
-                        # Parameter in der URL
-                        params = {'username': username, 'password': password}
-                        response = requests.get(url, params=params, headers=headers, timeout=timeout)
-                    else:
-                        # Fallback zu Basic Auth
-                        response = requests.get(url, auth=(username, password), headers=headers, timeout=timeout)
-                    
-                    print(f"HTTP Status: {response.status_code}")
-                    
-                    if response.status_code == 401:
-                        print("Authentifizierung fehlgeschlagen!")
-                        print("Mögliche Lösungen:")
-                        print("1. Überprüfen Sie Benutzername und Passwort")
-                        print("2. Versuchen Sie eine andere auth_method in der Konfiguration:")
-                        print("   - basic (Standard)")
-                        print("   - digest")
-                        print("   - token")
-                        print("   - url_params")
-                        print("3. Prüfen Sie ob die URL korrekt ist")
-                        print("4. Möglicherweise ist ein App-spezifisches Passwort erforderlich")
-                        sys.exit(1)
-                    elif response.status_code == 404:
-                        print("Fehler 404: Die angegebene URL wurde nicht gefunden")
-                        print("Bitte überprüfen Sie die URL in der Konfigurationsdatei")
-                        sys.exit(1)
-                    elif response.status_code == 403:
-                        print("Fehler 403: Zugriff verweigert")
-                        print("Der Benutzer hat keine Berechtigung für diese Ressource")
-                        sys.exit(1)
-                    
-                    response.raise_for_status()
-                    
-                    # Prüfe ob die Antwort eine gültige iCal-Datei ist
-                    content = response.text
-                    if not content.strip().startswith('BEGIN:VCALENDAR'):
-                        print("Warnung: Die heruntergeladene Datei scheint keine gültige iCal-Datei zu sein")
-                        print("Erste 200 Zeichen der Antwort:")
-                        print(content[:200])
-                        print("\nVersuche trotzdem fortzufahren...")
-                    
-                    print(f"iCal-Datei erfolgreich heruntergeladen ({len(content)} Zeichen)")
-                    return content
-                    
-                except requests.exceptions.Timeout:
-                    print(f"Zeitüberschreitung beim Versuch {attempt + 1}/{max_retries}")
-                    if attempt < max_retries - 1:
-                        print(f"Warte {retry_delay} Sekunden vor nächstem Versuch...")
-                        import time
-                        time.sleep(retry_delay)
-                    else:
-                        print("Fehler: Zeitüberschreitung beim Herunterladen der iCal-Datei")
-                        print(f"Alle {max_retries} Versuche mit {timeout}s Timeout fehlgeschlagen")
-                        print("Lösungsvorschläge:")
-                        print("1. Erhöhen Sie das Timeout in der Konfiguration: timeout = 120")
-                        print("2. Überprüfen Sie Ihre Internetverbindung")
-                        print("3. Versuchen Sie es zu einem anderen Zeitpunkt")
-                        print("4. Kontaktieren Sie den Administrator des Kalenderservers")
-                        sys.exit(1)
-                except requests.exceptions.ConnectionError:
-                    print(f"Verbindungsfehler beim Versuch {attempt + 1}/{max_retries}")
-                    if attempt < max_retries - 1:
-                        print(f"Warte {retry_delay} Sekunden vor nächstem Versuch...")
-                        import time
-                        time.sleep(retry_delay)
-                    else:
-                        print("Fehler: Verbindung zur URL fehlgeschlagen")
-                        print("Überprüfen Sie Ihre Internetverbindung und die URL")
-                        sys.exit(1)
-                        
-        except Exception as e:
-            print(f"Fehler beim Herunterladen der iCal-Datei: {e}")
-            print(f"URL: {url}")
-            print(f"Benutzername: {username}")
-            sys.exit(1)
-    
-    def parse_ical(self, ical_content):
-        """Parst die iCal-Datei und filtert relevante Einträge"""
-        calendar = Calendar.from_ical(ical_content)
-        events = []
-        
-        for component in calendar.walk():
-            if component.name == "VEVENT":
-                # Prüfe ob der Eintrag im gewünschten Monat liegt
-                start_date = component.get('dtstart').dt
-                
-                # Konvertiere zu lokaler Zeit falls nötig
-                if hasattr(start_date, 'tzinfo') and start_date.tzinfo is not None:
-                    start_date = start_date.astimezone(self.local_tz)
-                elif not hasattr(start_date, 'hour'):  # Falls es nur ein Datum ist
-                    start_date = datetime.combine(start_date, datetime.min.time())
-                    start_date = start_date.replace(tzinfo=self.local_tz)
-                
-                if (start_date.month == self.month and 
-                    start_date.year == self.year):
-                    
-                    description = str(component.get('description', ''))
-                    summary = str(component.get('summary', ''))
-                    
-                    # Prüfe auf Kundencode am Anfang der Beschreibung
-                    # PvSA, debug summary in month
-                    #print(summary)
-                    match = re.match(r'^([A-Z]{3}):', summary)
-                    if match:
-                        customer_code = match.group(1)
-                        # Entferne Kundencode aus der Beschreibung
-                        clean_description = summary[4:].strip()
-                        
-                        # Berechne Dauer falls vorhanden
-                        duration = None
-                        if 'dtend' in component:
-                            end_date = component.get('dtend').dt
-                            if hasattr(end_date, 'tzinfo') and end_date.tzinfo is not None:
-                                end_date = end_date.astimezone(self.local_tz)
-                            elif not hasattr(end_date, 'hour'):
-                                end_date = datetime.combine(end_date, datetime.min.time())
-                                end_date = end_date.replace(tzinfo=self.local_tz)
-                            
-                            if hasattr(start_date, 'hour') and hasattr(end_date, 'hour'):
-                                duration = end_date - start_date
-                        
-                        events.append({
-                            'customer_code': customer_code,
-                            'date': start_date,
-                            'description': clean_description,
-                            'duration': duration
-                        })
-        
-        return events
-    
-    def group_by_customer(self, events):
-        """Gruppiert Events nach Kundencode"""
-        customer_events = defaultdict(list)
-        for event in events:
-            customer_events[event['customer_code']].append(event)
-        return dict(customer_events)
-    
-    def create_pdf(self, customer_code, events):
-        """Erstellt ein PDF für einen Kunden"""
-        month_names = {
-            1: 'Januar', 2: 'Februar', 3: 'März', 4: 'April',
-            5: 'Mai', 6: 'Juni', 7: 'Juli', 8: 'August',
-            9: 'September', 10: 'Oktober', 11: 'November', 12: 'Dezember'
-        }
-        
-        month_name = month_names[self.month]
-        filename = f"{customer_code}_Abrechnung_{month_name}_{self.year}.pdf"
-        
-        # Erstelle PDF
-        doc = SimpleDocTemplate(filename, pagesize=A4)
-        story = []
-        styles = getSampleStyleSheet()
-        
-        # Logo einfügen (falls vorhanden)
-        logo_path = self.config.get('pdf', 'logo_path', fallback='logo.jpg')
-        if os.path.exists(logo_path):
-            try:
-                logo = Image(logo_path, width=4*cm, height=2*cm)
-                story.append(logo)
-                story.append(Spacer(1, 12))
-            except Exception as e:
-                print(f"Warnung: Logo konnte nicht geladen werden: {e}")
-        
-        # Titel
-        title_style = styles['Title']
-        title = Paragraph(f"Anlage Arbeitsstunden {customer_code} - {month_name} {self.year}", title_style)
-        story.append(title)
-        story.append(Spacer(1, 20))
-        
-        # Kundendaten (falls in Config vorhanden)
-        #if self.config.has_section('invoice_header'):
-        #header_style = styles['Normal']
-        #    for key, value in self.config['invoice_header'].items():
-        #story.append(Paragraph(f"<b>{key.title()}:</b> {value}", header_style))
-        #story.append(Spacer(1, 20))
-        
-        # Tabelle mit Terminen
-        table_data = [['Datum', 'Uhrzeit', 'Beschreibung', 'Dauer']]
-        
-        total_duration = timedelta()
-        for event in sorted(events, key=lambda x: x['date']):
-            date_str = event['date'].strftime('%d.%m.%Y')
-            time_str = event['date'].strftime('%H:%M')
-            description = event['description'] if event['description'] else event['summary']
-            
-            duration_str = ''
-            if event['duration']:
-                hours, remainder = divmod(event['duration'].total_seconds(), 3600)
-                minutes, _ = divmod(remainder, 60)
-#                duration_str = f"{int(hours):02d}:{int(minutes):02d}"
-                decimal_hours = hours + minutes / 60
-                duration_str = f"{decimal_hours:.2f}".replace('.', ',')
-                
-                total_duration += event['duration']
-            
-            table_data.append([date_str, time_str, description, duration_str])
-        
-        # Gesamtdauer hinzufügen
-        if total_duration.total_seconds() > 0:
-            hours, remainder = divmod(total_duration.total_seconds(), 3600)
-            minutes, _ = divmod(remainder, 60)
-            #table_data.append(['', '', 'Gesamtdauer:', f"{int(hours):02d}:{int(minutes):02d}"])
-            decimal_total_hours = hours + minutes / 60
-            table_data.append(['', '', 'Gesamtdauer:', f"{decimal_total_hours:.2f}".replace('.', ',')])
+            cfg = config_mod.lade_config(args.user)
+        except config_mod.ConfigError as exc:
+            print(f"Config-Fehler: {exc}")
+            return 2
+        return cmd_journal(cfg, args.jyear or 0)
 
-        
-        # Tabelle erstellen
-        table = Table(table_data, colWidths=[3*cm, 2*cm, 8*cm, 2*cm])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -2), colors.white),
-            ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        
-        story.append(table)
-        story.append(Spacer(1, 20))
-        
-        # Fußzeile
-        footer_style = styles['Normal']
-        story.append(Paragraph(f"Erstellt am: {datetime.now().strftime('%d.%m.%Y %H:%M')}", footer_style))
-        
-        # PDF erstellen
-        doc.build(story)
-        print(f"PDF erstellt: {filename}")
-        
-        return filename
-    
-    def send_email(self, pdf_filename, customer_code):
-        """Sendet das PDF per E-Mail"""
-        try:
-            # SMTP Konfiguration
-            smtp_server = self.config['smtp']['server']
-            smtp_port = int(self.config['smtp']['port'])
-            sender_email = self.config['smtp']['sender_email']
-            recipient_email = self.config['smtp']['recipient_email']
-            
-            # Optionale SMTP-Authentifizierung und Verschlüsselung
-            use_starttls = self.config.getboolean('smtp', 'use_starttls', fallback=False)
-            use_ssl = self.config.getboolean('smtp', 'use_ssl', fallback=False)
-            smtp_username = self.config.get('smtp', 'smtp_username', fallback=None)
-            smtp_password = self.config.get('smtp', 'smtp_password', fallback=None)
-            
-            print(f"Sende E-Mail über {smtp_server}:{smtp_port}")
-            print(f"STARTTLS: {use_starttls}, SSL: {use_ssl}, Auth: {bool(smtp_username)}")
-            
-            # E-Mail erstellen
-            msg = MIMEMultipart()
-            msg['From'] = sender_email
-            msg['To'] = recipient_email
-            msg['Subject'] = f"Abrechnung {customer_code} - {self.month:02d}/{self.year}"
-            
-            body = f"""
-            Hallo,
-            
-            anbei finden Sie die Abrechnung für {customer_code} vom {self.month:02d}/{self.year}.
-            
-            Mit freundlichen Grüßen
-            """
-            
-            msg.attach(MIMEText(body, 'plain'))
-            
-            # PDF anhängen
-            with open(pdf_filename, "rb") as attachment:
-                part = MIMEBase('application', 'octet-stream')
-                part.set_payload(attachment.read())
-                encoders.encode_base64(part)
-                part.add_header(
-                    'Content-Disposition',
-                    f'attachment; filename= {pdf_filename}'
-                )
-                msg.attach(part)
-            
-            # SMTP-Verbindung aufbauen
-            if use_ssl:
-                # Direkte SSL-Verbindung (meist Port 465)
-                server = smtplib.SMTP_SSL(smtp_server, smtp_port)
-                print("SSL-Verbindung hergestellt")
-            else:
-                # Standard SMTP-Verbindung (meist Port 25 oder 587)
-                server = smtplib.SMTP(smtp_server, smtp_port)
-                print("SMTP-Verbindung hergestellt")
-                
-                if use_starttls:
-                    # STARTTLS für sichere Übertragung aktivieren
-                    server.starttls()
-                    print("STARTTLS aktiviert")
-            
-            # Authentifizierung falls erforderlich
-            if smtp_username and smtp_password:
-                server.login(smtp_username, smtp_password)
-                print("SMTP-Authentifizierung erfolgreich")
-            
-            # E-Mail senden
-            server.sendmail(sender_email, recipient_email, msg.as_string())
-            server.quit()
-            
-            print(f"E-Mail für {customer_code} erfolgreich gesendet")
-            
-        except smtplib.SMTPAuthenticationError as e:
-            print(f"Fehler bei der SMTP-Authentifizierung für {customer_code}: {e}")
-            print("Überprüfen Sie SMTP-Benutzername und -Passwort")
-        except smtplib.SMTPConnectError as e:
-            print(f"Fehler beim Verbinden zum SMTP-Server für {customer_code}: {e}")
-            print("Überprüfen Sie SMTP-Server und Port")
-        except smtplib.SMTPException as e:
-            print(f"SMTP-Fehler beim Senden der E-Mail für {customer_code}: {e}")
-        except Exception as e:
-            print(f"Allgemeiner Fehler beim Senden der E-Mail für {customer_code}: {e}")
-    
-    def generate_invoices(self):
-        """Hauptfunktion zur Erstellung aller Rechnungen"""
-        print(f"Lade iCal-Datei für {self.username}...")
-        ical_content = self.download_ical()
-        
-        print("Parse iCal-Datei...")
-        events = self.parse_ical(ical_content)
-        
-        if not events:
-            print(f"Keine relevanten Termine für {self.month:02d}/{self.year} gefunden.")
-            return
-        
-        print(f"Gefundene Termine: {len(events)}")
-        
-        # Gruppiere nach Kunden
-        customer_events = self.group_by_customer(events)
-        
-        print(f"Kunden gefunden: {list(customer_events.keys())}")
-        
-        # Erstelle PDF für jeden Kunden
-        for customer_code, events in customer_events.items():
-            print(f"Erstelle Rechnung für {customer_code}...")
-            pdf_filename = self.create_pdf(customer_code, events)
-            
-            # Sende E-Mail
-            if self.config.has_section('smtp'):
-                self.send_email(pdf_filename, customer_code)
+    if not args.month or not args.year:
+        print("Für --hours/--expenses/--invoice/--full sind Monat und Jahr Pflicht.")
+        parser.print_help()
+        return 2
 
+    try:
+        cfg = config_mod.lade_config(args.user)
+    except config_mod.ConfigError as exc:
+        print(f"Config-Fehler: {exc}")
+        return 2
 
-def main():
-    parser = argparse.ArgumentParser(description='Erstellt Rechnungen aus iCal-Dateien')
-    parser.add_argument('username', help='Benutzername für Konfigurationsdatei')
-    parser.add_argument('month', type=int, help='Monat (1-12)')
-    parser.add_argument('year', type=int, help='Jahr (z.B. 2024)')
-    
-    args = parser.parse_args()
-    
-    # Validiere Eingaben
-    if not 1 <= args.month <= 12:
-        print("Fehler: Monat muss zwischen 1 und 12 liegen")
-        sys.exit(1)
-    
-    if args.year < 2000 or args.year > 2100:
-        print("Fehler: Jahr muss zwischen 2000 und 2100 liegen")
-        sys.exit(1)
-    
-    # Erstelle Pfad zur Konfigurationsdatei
-    base_path = os.path.dirname(os.path.abspath(__file__))
-    config_file = os.path.join(base_path, 'conf', f'{args.username}.conf')
-    
-    if not os.path.exists(config_file):
-        print(f"Fehler: Konfigurationsdatei {config_file} nicht gefunden")
-        print("\nBeispiel-Konfigurationsdatei:")
-        print("""
-[ical]
-url = https://calendar.example.com/calendar.ics
-username = ihr_username
-password = ihr_passwort
-auth_method = basic
-timeout = 60
-max_retries = 3
-retry_delay = 5
-# Mögliche auth_method Werte:
-# - basic: HTTP Basic Authentication (Standard)
-# - digest: HTTP Digest Authentication
-# - token: Bearer Token (password wird als Token verwendet)
-# - url_params: Parameter in der URL
-# 
-# timeout: Sekunden bis zur Zeitüberschreitung (Standard: 60)
-# max_retries: Maximale Anzahl der Wiederholungsversuche (Standard: 3)
-# retry_delay: Wartezeit zwischen Versuchen in Sekunden (Standard: 5)
-
-[smtp]
-server = smtp.example.com
-port = 587
-sender_email = sender@example.com
-recipient_email = recipient@example.com
-use_starttls = true
-use_ssl = false
-smtp_username = ihr_smtp_username
-smtp_password = ihr_smtp_passwort
-# SMTP-Verschlüsselungsoptionen:
-# - use_starttls: STARTTLS verwenden (empfohlen für Port 587)
-# - use_ssl: Direkte SSL-Verbindung (meist Port 465)
-# - smtp_username/smtp_password: Für SMTP-Authentifizierung (optional)
-
-[pdf]
-logo_path = logo.jpg
-
-[invoice_header]
-firma = Ihre Firma GmbH
-adresse = Musterstraße 1, 12345 Musterstadt
-telefon = +49 123 456789
-email = info@ihre-firma.de
-""")
-        sys.exit(1)
-    
-    # Erstelle und starte Generator
-    generator = InvoiceGenerator(config_file, args.username, args.month, args.year)
-    generator.generate_invoices()
+    try:
+        if args.hours:
+            return cmd_hours(cfg, args.month, args.year)
+        if args.expenses:
+            return cmd_expenses(cfg, args.month, args.year)
+        if args.invoice:
+            return cmd_invoice(cfg, args.month, args.year, dry_run=args.dry_run, nur_kunde=args.kunde)
+        if args.full:
+            return cmd_full(cfg, args.month, args.year, dry_run=args.dry_run, nur_kunde=args.kunde)
+    except Exception as exc:  # noqa: BLE001
+        print(f"FEHLER: {exc}")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

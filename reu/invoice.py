@@ -1,0 +1,318 @@
+"""Stufe 3: Rechnungs-PDF mit reportlab erzeugen.
+
+Pro Kunde eine Rechnung mit:
+  1. Sammelposition Stunden (Leistungszeitraum, Menge HUR, Stundensatz)
+  2. Einzelpositionen Auslagen (je ODS-Zeile)
+  3. Summenblock (Netto, USt 19%, Brutto)
+  4. Fuß mit USt-IdNr. beider Parteien, Steuernr., IBAN/BIC, Zahlungsziel,
+     Rechnungsnummer, Hinweis auf eingebettete E-Rechnung (nur bei Freigabe).
+
+Außerdem wird die Stundentabelle als Anlage-Seite beigelegt.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak,
+    Image,
+)
+
+from .config import Config, Leistender
+from .kunden import Kunde
+from .util import (
+    euro,
+    menge,
+    jahr_monat_text,
+    leistungszeitraum_iso,
+    UST_PROZENT,
+    UST_SATZ,
+    UNIT_STUNDE,
+    UNIT_STUECK,
+)
+
+
+class InvoiceError(Exception):
+    pass
+
+
+def _styles() -> dict[str, ParagraphStyle]:
+    styles = getSampleStyleSheet()
+    return {
+        "titel": ParagraphStyle("titel", parent=styles["Title"], fontSize=18, spaceAfter=4),
+        "normal": ParagraphStyle("normal", parent=styles["Normal"], fontSize=9, leading=12),
+        "klein": ParagraphStyle("klein", parent=styles["Normal"], fontSize=8, leading=10),
+        "fuss": ParagraphStyle("fuss", parent=styles["Normal"], fontSize=8, leading=11),
+        "kopf_rechts": ParagraphStyle(
+            "kopf_rechts", parent=styles["Normal"], fontSize=9, leading=12, alignment=2
+        ),
+    }
+
+
+def _adresse_kunde(k: Kunde) -> str:
+    zeilen = [k.name]
+    if k.strasse:
+        zeilen.append(k.strasse)
+    zeilen.append(f"{k.plz} {k.ort}")
+    zeilen.append(k.land)
+    return "<br/>".join(zeilen)
+
+
+def _adresse_leistender(l: Leistender) -> str:
+    zeilen = [l.name]
+    if l.strasse:
+        zeilen.append(l.strasse)
+    zeilen.append(f"{l.plz} {l.ort}")
+    zeilen.append(l.land)
+    return "<br/>".join(zeilen)
+
+
+def _positionen(
+    kunde: Kunde,
+    stunden: list[dict[str, Any]],
+    auslagen: list[dict[str, Any]],
+    year: int,
+    month: int,
+) -> tuple[list[list[Any]], dict[str, Decimal]]:
+    """Baut die Positionstabelle und Summen.
+
+    Returns (zeilen_fuer_tabelle, summen) mit summen:
+      netto_stunden, netto_auslagen, netto, ust, brutto, stunden_total
+    """
+    stunden_total = sum((e["dauer_h"] for e in stunden), Decimal("0"))
+    netto_stunden = (stunden_total * kunde.stundensatz).quantize(Decimal("0.01"))
+    netto_auslagen = sum((a["betrag_netto"] for a in auslagen), Decimal("0"))
+    netto = netto_stunden + netto_auslagen
+    ust = (netto * UST_SATZ).quantize(Decimal("0.01"))
+    brutto = netto + ust
+
+    zeitraum = f"{jahr_monat_text(year, month)}"
+    pos_zeilen: list[list[Any]] = [
+        ["Pos.", "Bezeichnung", "Menge", "Einh.", "Einzelpreis", "Netto"],
+        [
+            "1",
+            f"Beratungsleistung Leistungszeitraum {zeitraum}",
+            menge(stunden_total),
+            UNIT_STUNDE,
+            euro(kunde.stundensatz),
+            euro(netto_stunden),
+        ],
+    ]
+    for i, a in enumerate(auslagen, start=2):
+        bez = f"{a['art']} {a['bezeichnung']}".strip()
+        if a["belegnr"]:
+            bez += f" (Beleg {a['belegnr']})"
+        pos_zeilen.append(
+            [
+                str(i),
+                bez,
+                "1,00",
+                UNIT_STUECK,
+                euro(a["betrag_netto"]),
+                euro(a["betrag_netto"]),
+            ]
+        )
+
+    summen = {
+        "stunden_total": stunden_total,
+        "netto_stunden": netto_stunden,
+        "netto_auslagen": netto_auslagen,
+        "netto": netto,
+        "ust": ust,
+        "brutto": brutto,
+    }
+    return pos_zeilen, summen
+
+
+def _summenblock(summen: dict[str, Decimal]) -> Table:
+    data = [
+        ["Netto gesamt", euro(summen["netto"])],
+        [f"USt {UST_PROZENT:.0f}%", euro(summen["ust"])],
+        ["Brutto gesamt", euro(summen["brutto"])],
+    ]
+    t = Table(data, colWidths=[60 * mm, 30 * mm])
+    t.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("LINEABOVE", (0, 1), (-1, 1), 0.5, colors.grey),
+                ("LINEABOVE", (0, 2), (-1, 2), 0.5, colors.grey),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("FONTNAME", (0, 2), (-1, 2), "Helvetica-Bold"),
+            ]
+        )
+    )
+    return t
+
+
+def _stunden_anlage(stunden: list[dict[str, Any]], kunde: Kunde, year: int, month: int) -> list:
+    """Stundentabelle als Anlage-Seite."""
+    styles = _styles()
+    story: list = []
+    story.append(Paragraph(f"Anlage: Arbeitsstunden {leistungszeitraum_iso(year, month)}", styles["titel"]))
+    story.append(Paragraph(f"Kunde: {kunde.name} ({kunde.kunde})", styles["normal"]))
+    story.append(Spacer(1, 6 * mm))
+    data = [["Datum", "Dauer (h)", "Beschreibung"]]
+    total = Decimal("0")
+    for e in stunden:
+        data.append([e["datum"].isoformat(), menge(e["dauer_h"]), e["beschreibung"]])
+        total += e["dauer_h"]
+    data.append(["Summe", menge(total), ""])
+    t = Table(data, colWidths=[25 * mm, 22 * mm, 110 * mm])
+    t.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("GRID", (0, 0), (-1, -2), 0.25, colors.grey),
+                ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.black),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    story.append(t)
+    return story
+
+
+def erzeuge_rechnung_pdf(
+    *,
+    cfg: Config,
+    kunde: Kunde,
+    stunden: list[dict[str, Any]],
+    auslagen: list[dict[str, Any]],
+    year: int,
+    month: int,
+    renr: str,
+    re_datum: _dt.date,
+    faelligkeit: _dt.date,
+    entwurf: bool,
+    freigegeben: bool,
+    ausgabe_pfad: Path,
+) -> dict[str, Decimal]:
+    """Erzeugt die Rechnungs-PDF und liefert die Summen zurück.
+
+    entwurf: True → Wasserzeichen ENTWURF, Hinweis „keine E-Rechnung eingebettet".
+    freigegeben: True → Hinweis auf eingebettete ZUGFeRD (nur bei finaler Rechnung).
+    """
+    styles = _styles()
+    pos_zeilen, summen = _positionen(kunde, stunden, auslagen, year, month)
+
+    story: list = []
+    # Logo (optional)
+    if cfg.logo_path.is_file():
+        try:
+            story.append(Image(str(cfg.logo_path), width=45 * mm, height=20 * mm))
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Kopf: Empfänger links, Absender/Re-Nr rechts
+    story.append(Spacer(1, 4 * mm))
+    kopf = Table(
+        [
+            [Paragraph(_adresse_kunde(kunde), styles["normal"]),
+             Paragraph(_adresse_leistender(cfg.leistender), styles["kopf_rechts"])],
+            ["",
+             Paragraph(
+                 f"Rechnungsdatum: {re_datum.isoformat()}<br/>"
+                 f"Rechnungsnummer: {renr}<br/>"
+                 f"Leistungszeitraum: {leistungszeitraum_iso(year, month)}",
+                 styles["kopf_rechts"],
+             )],
+        ],
+        colWidths=[90 * mm, 90 * mm],
+    )
+    kopf.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    story.append(kopf)
+    story.append(Spacer(1, 6 * mm))
+
+    story.append(Paragraph("Rechnung", styles["titel"]))
+    if entwurf:
+        story.append(
+            Paragraph(
+                '<font color="red"><b>ENTWURF – nicht zur Zahlung freigegeben</b></font>',
+                styles["normal"],
+            )
+        )
+    story.append(Spacer(1, 4 * mm))
+
+    # Positionstabelle
+    t = Table(pos_zeilen, colWidths=[12 * mm, 78 * mm, 18 * mm, 14 * mm, 24 * mm, 26 * mm])
+    t.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eeeeee")),
+                ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+                ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    story.append(t)
+    story.append(Spacer(1, 4 * mm))
+    story.append(_summenblock(summen))
+    story.append(Spacer(1, 8 * mm))
+
+    # Fuß
+    fuss_text = (
+        f"Zahlungsziel: bis {faelligkeit.isoformat()}.<br/>"
+        f"IBAN: {cfg.erechnung.iban}<br/>"
+        f"BIC: {cfg.erechnung.bic}<br/>"
+        f"Bank: {cfg.erechnung.bank}<br/>"
+        f"USt-IdNr. (Leistender): {cfg.leistender.ust_id}<br/>"
+        f"USt-IdNr. (Kunde): {kunde.ust_id}<br/>"
+    )
+    if cfg.leistender.steuernr:
+        fuss_text += f"Steuernr.: {cfg.leistender.steuernr}<br/>"
+    if freigegeben and not entwurf:
+        fuss_text += (
+            "<br/>Diese Rechnung enthält eine elektronische Rechnung gem. "
+            "EN 16931 (ZUGFeRD / Faktur-X) als eingebettete Datei."
+        )
+    else:
+        fuss_text += (
+            "<br/>Dies ist ein Rechnungsentwurf. Es ist keine elektronische "
+            "Rechnung gem. EN 16931 eingebettet."
+        )
+    story.append(Paragraph(fuss_text, styles["fuss"]))
+
+    # Anlage: Stunden
+    if stunden:
+        story.append(PageBreak())
+        story.extend(_stunden_anlage(stunden, kunde, year, month))
+
+    ausgabe_pfad.parent.mkdir(parents=True, exist_ok=True)
+    doc = SimpleDocTemplate(
+        str(ausgabe_pfad),
+        pagesize=A4,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
+        title=f"Rechnung {renr}",
+        author=cfg.leistender.name,
+    )
+    doc.build(story)
+    return summen

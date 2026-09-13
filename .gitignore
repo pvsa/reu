@@ -14,3 +14,8 @@ conf/*.state.json
 
 # Beispiel-Auslagen nur als Vorlage; reale monatliche ODS nicht einchecken
 # (conf/auslagen_*.ods wird nur als Beispiel gepflegt)
+
+# Logo: lokales pilarkto.net-Logo, nicht für das öffentliche Repo
+logo.jpg
+*.jpg
+!conf/*.jpg

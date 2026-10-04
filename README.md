@@ -47,7 +47,7 @@ reu/
 │   ├── __init__.py
 │   ├── config.py           # lädt conf/<user>.conf (INI)
 │   ├── kunden.py           # Kundenstammdaten aus <user>-kunden.ods
-│   ├── ods.py              # ODS-Lesehilfe (pyexcel-ods3)
+│   ├── ods.py              # ODS-Lesehilfe (Python-stdlib, ohne Zusatzpakete)
 │   ├── ical.py             # Stufe 1: Stunden aus iCal → dict
 │   ├── expenses.py         # Stufe 2: Auslagen aus ODS + Freigabe-Check
 │   ├── invoice.py          # Stufe 3: Rechnungs-PDF (reportlab)
@@ -168,7 +168,7 @@ ENTWURF-YYYY-MM-DD-HHMMSS (nicht persistent).
 ## Abhängigkeiten
 
 ```
-pyexcel-ods3   # ODS lesen/schreiben
+(ODS lesen)    # entfällt – reu/ods.py nutzt zipfile + xml (Python-stdlib)
 drafthorse     # Faktur-X XML (EN 16931) + PDF/A-3-Embedding
 pypdf          # (transitiv über drafthorse)
 reportlab      # Rechnungs-PDF
@@ -176,9 +176,18 @@ requests icalendar pytz  # iCal-Download/Parse
 lxml           # XML-Validierung (transitiv über drafthorse)
 ```
 
-Installieren:
+Installieren (Debian/Ubuntu ohne pip):
+
 ```bash
-python3 -m pip install pyexcel-ods3 drafthorse reportlab requests icalendar pytz
+apt install python3-drafthorse python3-reportlab python3-icalendar \
+            python3-pytz python3-requests python3-lxml python3-pypdf
+```
+
+Hinweis: `python3-drafthorse` gibt es ab Debian 13 (trixie) bzw.
+Ubuntu 25.10; auf älteren Releases bleibt für drafthorse nur pip:
+
+```bash
+python3 -m pip install drafthorse reportlab requests icalendar pytz
 ```
 
 ## iCal-Feed

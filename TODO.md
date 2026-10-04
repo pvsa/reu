@@ -14,8 +14,9 @@
 ## Mittelbar / Verbesserungen
 
 - [ ] **requirements.txt** anlegen
-  (`pyexcel-ods3 drafthorse reportlab requests icalendar pytz`,
-  `lxml`/`pypdf` transitiv via drafthorse).
+  (`drafthorse reportlab requests icalendar pytz`,
+  `lxml`/`pypdf` transitiv via drafthorse; ODS-Lesen läuft ohne externe
+  Abhängigkeit über die Python-stdlib).
 - [ ] **Volle PDF/A-3-Konformität**: Quell-PDF vor `attach_xml` PDF/A-konform
   erzeugen (ICC-Profil/OutputIntent hinterlegen, z.B. via Ghostscript
   oder reportlab PDF/A-Option), da drafthorse kein PDF/A aus dem Nichts baut.

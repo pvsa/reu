@@ -33,8 +33,9 @@ Bei Mehrmonats-Zeiträumen gilt:
   letzten Monats (Zeitzonen werden normalisiert).
 - **Auslagen**: die Monats-ODSen werden je Monat geladen ({year}/{month}-
   Template) und zusammengefasst. Fehlende Monatsdateien sind erlaubt. Existiert **keine**
-  Monatsdatei des Zeitraums, fragt das CLI vor dem Fortfahren um
-  Bestätigung, dass ohne Auslagen abgerechnet wird (Abbruch mit Enter).
+  Monatsdatei des Zeitraums, fragt das CLI **zu Beginn** um Bestätigung, dass
+  ohne Auslagen abgerechnet wird – **Default ist Fortfahren** (Enter oder `j`);
+  nur `n`/`nein` bricht ab.
   Freigabe (Meta!A1 = yes) muss in **allen** vorhandenen Monatsdateien gesetzt sein.
 - **Rechnungsdatum** = letzter Tag des letzten Monats des Zeitraums,
   Zahlungsziel ab diesem Datum.

@@ -54,6 +54,14 @@ def _lies_monatsdatei(pfad: str, conf: AuslagenConf) -> tuple[list[dict[str, Any
     return saetze, freigabe
 
 
+def auslagen_dateien_vorhanden(conf: AuslagenConf, zeitraum: Zeitraum) -> bool:
+    """True, wenn mindestens eine Auslagen-Datei des Zeitraums existiert."""
+    return any(
+        Path(_aufgeloester_pfad(conf.datei, zeitraum.jahr, monat)).is_file()
+        for monat in zeitraum.monate
+    )
+
+
 def lade_auslagen(
     conf: AuslagenConf, zeitraum: Zeitraum, bekannte_kunden: set[str]
 ) -> dict[str, Any]:

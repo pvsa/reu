@@ -30,7 +30,6 @@ from reportlab.platypus import (
     Table,
     TableStyle,
     PageBreak,
-    Image,
 )
 
 from .config import Config, Leistender
@@ -223,18 +222,29 @@ def erzeuge_rechnung_pdf(
     pos_zeilen, summen = _positionen(kunde, stunden, auslagen, zeitraum)
 
     story: list = []
-    # Briefkopf: Logo oben links, darunter Abstand, dann Adressfeld
-    # (Empfänger tiefer gesetzt, wie im klassischen Briefkopf-Layout)
-    if cfg.logo_path.is_file():
+    # Briefkopf: Logo wird auf der ersten Seite direkt auf dem Canvas
+    # gezeichnet (onFirstPage-Callback) – garantiert oben links am
+    # Satzspiegelrand, unabhängig von Flowable-Alignment-Eigenheiten
+    # der reportlab-Version. Im Story bleibt nur der Platzhalter-Abstand.
+    logo_w, logo_h = 31.5 * mm, 14 * mm
+    hat_logo = cfg.logo_path.is_file()
+
+    def _briefkopf_logo(canvas, doc):  # noqa: ANN001 – reportlab-Signatur
+        if not hat_logo:
+            return
         try:
-            logo = Image(str(cfg.logo_path), width=31.5 * mm, height=14 * mm)
-            logo.hAlign = "LEFT"  # Briefkopf: Logo links, nicht zentriert
-            story.append(logo)
-            story.append(Spacer(1, 12 * mm))
-        except Exception:  # noqa: BLE001
-            story.append(Spacer(1, 16 * mm))
-    else:
-        story.append(Spacer(1, 16 * mm))
+            canvas.drawImage(
+                str(cfg.logo_path),
+                doc.leftMargin,
+                doc.pagesize[1] - doc.topMargin - logo_h,
+                width=logo_w,
+                height=logo_h,
+                mask="auto",
+            )
+        except Exception:  # noqa: BLE001 – Logo darf den Druck nie blockieren
+            pass
+
+    story.append(Spacer(1, (logo_h + 12 * mm) if hat_logo else 16 * mm))
 
     # Kopf: Empfänger links, Absender/Re-Nr rechts
     story.append(Spacer(1, 4 * mm))
@@ -326,5 +336,5 @@ def erzeuge_rechnung_pdf(
         title=f"Rechnung {renr}",
         author=cfg.leistender.name,
     )
-    doc.build(story)
+    doc.build(story, onFirstPage=_briefkopf_logo)
     return summen

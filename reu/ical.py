@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
-import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -107,8 +106,10 @@ def _zeitraum_bereich(zeitraum: Zeitraum) -> tuple[_dt.datetime, _dt.datetime]:
 def lade_stunden(conf: ICalConf, zeitraum: Zeitraum) -> dict[str, list[dict[str, Any]]]:
     """Lädt iCal und liefert {kunde: [ {datum, dauer_h, beschreibung} ]}.
 
-    Termine außerhalb des Zeitraums werden ignoriert. Termine ohne Dauer
-    (z.B. Ganztages) werden als 0,00 h erfasst und entsprechend ausgewiesen.
+    Termine außerhalb des Zeitraums werden ignoriert. Termine ohne
+    Kundenkürzel (interne/technische Einträge) werden stillschweigend
+    übersprungen. Termine ohne Dauer (z.B. Ganztages) werden als 0,00 h
+    erfasst und entsprechend ausgewiesen.
     """
     roh = _lade_ical(conf)
     try:
@@ -118,7 +119,6 @@ def lade_stunden(conf: ICalConf, zeitraum: Zeitraum) -> dict[str, list[dict[str,
 
     start, end = _zeitraum_bereich(zeitraum)
     ergebnis: dict[str, list[dict[str, Any]]] = {}
-    ohne_kuerzel: list[str] = []
 
     for event in cal.walk("VEVENT"):
         dtstart = event.get("dtstart")
@@ -142,10 +142,7 @@ def lade_stunden(conf: ICalConf, zeitraum: Zeitraum) -> dict[str, list[dict[str,
             continue
         kunde_aus_event = _kunde_aus_event(event)
         if kunde_aus_event is None:
-            summary = str(event.get("summary") or "").strip()
-            ohne_kuerzel.append(
-                f"{ev_start.astimezone(pytz.UTC).date()}: {summary or '(ohne SUMMARY)'}"
-            )
+            # Termine ohne Kürzel sind nicht abrechenbar – stillschweigend ignorieren
             continue
         kunde, beschreibung = kunde_aus_event
         dauer = _dauer_stunden(ev_start, ev_end)
@@ -156,18 +153,6 @@ def lade_stunden(conf: ICalConf, zeitraum: Zeitraum) -> dict[str, list[dict[str,
                 "beschreibung": beschreibung or str(event.get("summary") or ""),
             }
         )
-
-    # Hinweis auf übersprungene, nicht abrechenbare Termine
-    if ohne_kuerzel:
-        print(
-            f"Hinweis: {len(ohne_kuerzel)} Termin(e) ohne Kundenkürzel übersprungen "
-            "(nicht abrechenbar, Präfix 'ABC: …' fehlt):",
-            file=sys.stderr,
-        )
-        for eintrag in ohne_kuerzel[:10]:
-            print(f"  {eintrag}", file=sys.stderr)
-        if len(ohne_kuerzel) > 10:
-            print(f"  … und {len(ohne_kuerzel) - 10} weitere", file=sys.stderr)
 
     # sortieren nach Datum
     for kunde in ergebnis:

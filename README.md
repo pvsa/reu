@@ -196,8 +196,8 @@ python3 -m pip install drafthorse reportlab requests icalendar pytz
 Ein Termineintrag braucht ein Kundenkürzel im SUMMARY-Präfix ('ABC: …')
 oder in der CATEGORIES-Eigenschaft. Termine außerhalb des angefragten
 Zeitraums werden ignoriert. Termine **ohne** Kürzel (z.B. interne/
-technische Einträge wie Backups) gelten als nicht abrechenbar: sie werden
-mit einem Hinweis auf stderr übersprungen – der Lauf bricht nicht ab.
+technische Einträge wie Backups) gelten als nicht abrechenbar und werden
+stillschweigend übersprungen – der Lauf bricht nicht ab.
 
 ## Validierung der ZUGFeRD-PDF (Pflicht)
 

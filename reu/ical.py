@@ -152,7 +152,10 @@ def lade_stunden(conf: ICalConf, zeitraum: Zeitraum) -> dict[str, list[dict[str,
         dauer = _dauer_stunden(ev_start, ev_end)
         ergebnis.setdefault(kunde, []).append(
             {
-                "datum": ev_start.astimezone(pytz.UTC).date(),
+                # Datum und Startzeit in der Zeitzone des Kalendereintrags
+                # (lokale Anzeige, wie im Kalender eingetragen)
+                "datum": ev_start.date(),
+                "start": ev_start.strftime("%H:%M"),
                 "dauer_h": dauer,
                 "beschreibung": beschreibung or str(event.get("summary") or ""),
             }

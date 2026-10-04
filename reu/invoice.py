@@ -7,7 +7,10 @@ Pro Kunde und Zeitraum eine Rechnung mit:
   4. Fuß mit USt-IdNr. (soweit vorhanden), IBAN/BIC, Zahlungsziel,
      Rechnungsnummer, Hinweis auf eingebettete E-Rechnung (nur bei Freigabe).
 
-Außerdem wird die Stundentabelle als Anlage-Seite beigelegt.
+Außerdem wird die Stundentabelle als Anlage-Seite beigelegt
+(Spalten: Datum, Startzeit, Beschreibung, Dauer).
+
+Erste Seite im Briefkopf-Stil: Logo oben links, Adressfeld darunter.
 """
 from __future__ import annotations
 
@@ -164,13 +167,20 @@ def _stunden_anlage(stunden: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitr
     story.append(Paragraph(f"Anlage: Arbeitsstunden {zeitraum.text}", styles["titel"]))
     story.append(Paragraph(f"Kunde: {kunde.name} ({kunde.kunde})", styles["normal"]))
     story.append(Spacer(1, 6 * mm))
-    data = [["Datum", "Dauer (h)", "Beschreibung"]]
+    data = [["Datum", "Start", "Beschreibung", "Dauer (h)"]]
     total = Decimal("0")
     for e in stunden:
-        data.append([e["datum"].isoformat(), menge(e["dauer_h"]), e["beschreibung"]])
+        data.append(
+            [
+                e["datum"].isoformat(),
+                str(e.get("start", "")),
+                e["beschreibung"],
+                menge(e["dauer_h"]),
+            ]
+        )
         total += e["dauer_h"]
-    data.append(["Summe", menge(total), ""])
-    t = Table(data, colWidths=[25 * mm, 22 * mm, 110 * mm])
+    data.append(["Summe", "", "", menge(total)])
+    t = Table(data, colWidths=[20 * mm, 15 * mm, 113 * mm, 22 * mm])
     t.setStyle(
         TableStyle(
             [
@@ -179,7 +189,8 @@ def _stunden_anlage(stunden: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitr
                 ("GRID", (0, 0), (-1, -2), 0.25, colors.grey),
                 ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.black),
                 ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-                ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+                ("ALIGN", (1, 1), (1, -1), "CENTER"),
+                ("ALIGN", (3, 1), (3, -1), "RIGHT"),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
             ]
@@ -212,12 +223,16 @@ def erzeuge_rechnung_pdf(
     pos_zeilen, summen = _positionen(kunde, stunden, auslagen, zeitraum)
 
     story: list = []
-    # Logo (optional)
+    # Briefkopf: Logo oben links, darunter Abstand, dann Adressfeld
+    # (Empfänger tiefer gesetzt, wie im klassischen Briefkopf-Layout)
     if cfg.logo_path.is_file():
         try:
             story.append(Image(str(cfg.logo_path), width=45 * mm, height=20 * mm))
+            story.append(Spacer(1, 12 * mm))
         except Exception:  # noqa: BLE001
-            pass
+            story.append(Spacer(1, 16 * mm))
+    else:
+        story.append(Spacer(1, 16 * mm))
 
     # Kopf: Empfänger links, Absender/Re-Nr rechts
     story.append(Spacer(1, 4 * mm))

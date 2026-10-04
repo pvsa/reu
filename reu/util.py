@@ -131,7 +131,15 @@ def dezimal(wert: object, *, default: Decimal | None = None) -> Decimal:
     text = str(wert).strip()
     if not text:
         return default if default is not None else Decimal("0")
-    text = text.replace(".", "").replace(",", ".")
+    if "," in text and "." in text:
+        # Beide Trenner: 1.234,56 (DE) bzw. 1,234.56 (EN) – der letzte gewinnt
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        text = text.replace(",", ".")
+    # nur '.': EN-Dezimalpunkt, bleibt unverändert
     try:
         return Decimal(text)
     except InvalidOperation:

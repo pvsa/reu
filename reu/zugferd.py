@@ -3,7 +3,8 @@
 Verwendet drafthorse für das XML (CrossIndustryInvoice, Profil EN 16931)
 und drafthorse.pdf.attach_xml für das PDF/A-3 + AF-Embedding.
 
-Mapping (B2B, immer 19% USt, ein Stunden-Sammelposten + Auslagenposten).
+Mapping (B2B, immer 19% USt, ein Stunden-Sammelposten + Serviceposten
+je Service und Monat + Auslagenposten).
 TaxRegistration (USt-IdNr.) wird nur gesetzt, wenn eine USt-IdNr. vorliegt
 (Verkäufer: Pflicht in der Config; Käufer: optional).
 """
@@ -87,6 +88,7 @@ def erzeuge_xml(
     kunde: Kunde,
     stunden: list[dict[str, Any]],
     auslagen: list[dict[str, Any]],
+    services: list[dict[str, Any]],
     summen: dict[str, Decimal],
     renr: str,
     re_datum: _dt.date,
@@ -151,18 +153,33 @@ def erzeuge_xml(
         pm.payee_institution.bic = cfg.erechnung.bic
     settlement.payment_means.add(pm)
 
-    # Position 1: Stunden (Sammelposition)
+    # Positionen: Stunden (falls > 0), dann Services (je Service+Monat),
+    # dann Auslagen – fortlaufend nummeriert, konsistent zur PDF.
+    pos_nr = 1
     stunden_total = summen["stunden_total"]
-    _add_lineitem(
-        document,
-        line_id="1",
-        name=f"Beratungsleistung Leistungszeitraum {zeitraum.text}",
-        description=f"{stunden_total} Stunden zu je {kunde.stundensatz} EUR",
-        menge=stunden_total,
-        unit=UNIT_STUNDE,
-        einzelpreis=kunde.stundensatz,
-    )
-    for i, a in enumerate(auslagen, start=2):
+    if stunden_total > 0:
+        _add_lineitem(
+            document,
+            line_id=str(pos_nr),
+            name=f"Beratungsleistung Leistungszeitraum {zeitraum.text}",
+            description=f"{stunden_total} Stunden zu je {kunde.stundensatz} EUR",
+            menge=stunden_total,
+            unit=UNIT_STUNDE,
+            einzelpreis=kunde.stundensatz,
+        )
+        pos_nr += 1
+    for s in services:
+        _add_lineitem(
+            document,
+            line_id=str(pos_nr),
+            name=f"{s['service']} – {s['monat']:02d}/{s['jahr']}",
+            description=f"Serviceleistung {s['monat']:02d}/{s['jahr']}",
+            menge=s["menge"],
+            unit=UNIT_STUECK,
+            einzelpreis=s["einzelpreis"],
+        )
+        pos_nr += 1
+    for i, a in enumerate(auslagen, start=pos_nr):
         bez = f"{a['art']} {a['bezeichnung']}".strip()
         if a["belegnr"]:
             bez += f" (Beleg {a['belegnr']})"
@@ -208,6 +225,7 @@ def erzeuge_zugferd_pdf(
     kunde: Kunde,
     stunden: list[dict[str, Any]],
     auslagen: list[dict[str, Any]],
+    services: list[dict[str, Any]],
     summen: dict[str, Decimal],
     renr: str,
     re_datum: _dt.date,
@@ -220,6 +238,7 @@ def erzeuge_zugferd_pdf(
         kunde=kunde,
         stunden=stunden,
         auslagen=auslagen,
+        services=services,
         summen=summen,
         renr=renr,
         re_datum=re_datum,

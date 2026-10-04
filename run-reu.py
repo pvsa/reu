@@ -25,6 +25,7 @@ from reu import (
     ical as ical_mod,
     invoice as invoice_mod,
     kunden as kunden_mod,
+    services as services_mod,
     smtp as smtp_mod,
     state as state_mod,
     zugferd as zugferd_mod,
@@ -133,6 +134,7 @@ def _erzeuge_rechnung(
     kunde: Kunde,
     stunden: list[dict],
     auslagen: list[dict],
+    services: list[dict],
     zeitraum: Zeitraum,
     state: state_mod.State,
     dry_run: bool,
@@ -156,6 +158,7 @@ def _erzeuge_rechnung(
         kunde=kunde,
         stunden=stunden,
         auslagen=auslagen,
+        services=services,
         zeitraum=zeitraum,
         renr=renr,
         re_datum=re_datum,
@@ -176,6 +179,7 @@ def _erzeuge_rechnung(
             kunde=kunde,
             stunden=stunden,
             auslagen=auslagen,
+            services=services,
             summen=summen,
             renr=renr,
             re_datum=re_datum,
@@ -205,6 +209,14 @@ def _erzeuge_rechnung(
 
 def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: str | None) -> int:
     kunden = _lade_kunden(cfg)
+    services_alle = services_mod.lade_services(
+        cfg.kunden.datei, bekannte_kunden=set(kunden)
+    )
+    services_pos = {
+        k: services_mod.positionen_fuer_zeitraum(svc, zeitraum)
+        for k, svc in services_alle.items()
+        if services_mod.positionen_fuer_zeitraum(svc, zeitraum)
+    }
     stunden_alle = ical_mod.lade_stunden(cfg.ical, zeitraum)
     auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
     if auslagen_erg.get("ohne_dateien"):
@@ -218,7 +230,9 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
     freigegeben = auslagen_erg["freigegeben"]
     state = state_mod.lade_state(cfg.state_pfad)
 
-    kunden_keys = sorted(set(stunden_alle) | set(auslagen_erg["auslagen"]))
+    kunden_keys = sorted(
+        set(stunden_alle) | set(auslagen_erg["auslagen"]) | set(services_pos)
+    )
     if nur_kunde:
         kunden_keys = [k for k in kunden_keys if k == nur_kunde]
     if not kunden_keys:
@@ -233,9 +247,10 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
             continue
         stunden = stunden_alle.get(k, [])
         auslagen = auslagen_erg["auslagen"].get(k, [])
-        if not stunden and not auslagen:
+        services = services_pos.get(k, [])
+        if not stunden and not auslagen and not services:
             continue
-        erg = _erzeuge_rechnung(cfg, kunde, stunden, auslagen, zeitraum, state, dry_run, freigegeben)
+        erg = _erzeuge_rechnung(cfg, kunde, stunden, auslagen, services, zeitraum, state, dry_run, freigegeben)
         ergebnisse.append(erg)
         print(f"{'ENTWURF ' if erg['entwurf'] else 'FINALE  '}{k}: {erg['renr']}  Netto {euro(erg['summen']['netto'])}  Brutto {euro(erg['summen']['brutto'])}  → {erg['pdf']}")
 

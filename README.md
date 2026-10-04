@@ -48,6 +48,7 @@ reu/
 │   ├── __init__.py
 │   ├── config.py           # lädt conf/<user>.conf (INI)
 │   ├── kunden.py           # Kundenstammdaten aus <user>-kunden.ods
+│   ├── services.py         # Service-Positionen aus Blatt 'Services' der kunden.ods
 │   ├── ods.py              # ODS-Lesehilfe (Python-stdlib, ohne Zusatzpakete)
 │   ├── ical.py             # Stufe 1: Stunden aus iCal → dict
 │   ├── expenses.py         # Stufe 2: Auslagen aus ODS + Freigabe-Check
@@ -91,6 +92,17 @@ Optional: strasse, leitweg_id (B2B optional, B2G Pflicht) und **ust_id**.
 Eine leere ust_id ist erlaubt: sie wird dann weder im PDF-Fuß noch im
 ZUGFeRD-XML (TaxRegistration VA) ausgewiesen.
 'stundensatz' als DE-Dezimal '95,00' oder EN '95.00'.
+
+**Blatt 'Services' (optional, eine Zeile je Kunde und Service):**
+
+| kunde | service | Kosten pro Stück [€] | 1 | 2 | 3 | … | 12 |
+|-------|---------|----------------------|---|---|---|---|----|
+
+Die Spalten '1'–'12' sind die Monate des Jahres; der Zellwert ist die
+Anzahl der Serviceeinheiten in diesem Monat (leer = 0). Pro Service und
+Monat mit Menge > 0 entsteht eine eigene Rechnungsposition auf der
+Rechnungs-Erstseite (und im ZUGFeRD-XML). Kunden mit nur Service-Einheiten
+(ohne Stunden/Auslagen) bekommen ebenfalls eine Rechnung.
 
 ## Auslagen-ODS conf/auslagen_{year}-{month:02d}.ods
 

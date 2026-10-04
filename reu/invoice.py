@@ -84,32 +84,61 @@ def _positionen(
     kunde: Kunde,
     stunden: list[dict[str, Any]],
     auslagen: list[dict[str, Any]],
+    services: list[dict[str, Any]],
     zeitraum: Zeitraum,
 ) -> tuple[list[list[Any]], dict[str, Decimal]]:
     """Baut die Positionstabelle und Summen.
 
+    Services: Liste von {service, monat, jahr, menge, einzelpreis} –
+    je Service und Monat mit Menge > 0 eine eigene Position.
+
     Returns (zeilen_fuer_tabelle, summen) mit summen:
-      netto_stunden, netto_auslagen, netto, ust, brutto, stunden_total
+      netto_stunden, netto_services, netto_auslagen, netto, ust, brutto,
+      stunden_total
     """
     stunden_total = sum((e["dauer_h"] for e in stunden), Decimal("0"))
     netto_stunden = (stunden_total * kunde.stundensatz).quantize(Decimal("0.01"))
+    netto_services = sum(
+        (
+            (s["menge"] * s["einzelpreis"]).quantize(Decimal("0.01"))
+            for s in services
+        ),
+        Decimal("0"),
+    )
     netto_auslagen = sum((a["betrag_netto"] for a in auslagen), Decimal("0"))
-    netto = netto_stunden + netto_auslagen
+    netto = netto_stunden + netto_services + netto_auslagen
     ust = (netto * UST_SATZ).quantize(Decimal("0.01"))
     brutto = netto + ust
 
     pos_zeilen: list[list[Any]] = [
         ["Pos.", "Bezeichnung", "Menge", "Einh.", "Einzelpreis", "Netto"],
-        [
-            "1",
-            f"Beratungsleistung Leistungszeitraum {zeitraum.text}",
-            menge(stunden_total),
-            UNIT_STUNDE,
-            euro(kunde.stundensatz),
-            euro(netto_stunden),
-        ],
     ]
-    for i, a in enumerate(auslagen, start=2):
+    pos_nr = 1
+    if stunden_total > 0:
+        pos_zeilen.append(
+            [
+                str(pos_nr),
+                f"Beratungsleistung Leistungszeitraum {zeitraum.text}",
+                menge(stunden_total),
+                UNIT_STUNDE,
+                euro(kunde.stundensatz),
+                euro(netto_stunden),
+            ]
+        )
+        pos_nr += 1
+    for s in services:
+        pos_zeilen.append(
+            [
+                str(pos_nr),
+                f"{s['service']} – {s['monat']:02d}/{s['jahr']}",
+                menge(s["menge"]),
+                UNIT_STUECK,
+                euro(s["einzelpreis"]),
+                euro((s["menge"] * s["einzelpreis"]).quantize(Decimal("0.01"))),
+            ]
+        )
+        pos_nr += 1
+    for i, a in enumerate(auslagen, start=pos_nr):
         bez = f"{a['art']} {a['bezeichnung']}".strip()
         if a["belegnr"]:
             bez += f" (Beleg {a['belegnr']})"
@@ -127,6 +156,7 @@ def _positionen(
     summen = {
         "stunden_total": stunden_total,
         "netto_stunden": netto_stunden,
+        "netto_services": netto_services,
         "netto_auslagen": netto_auslagen,
         "netto": netto,
         "ust": ust,
@@ -205,6 +235,7 @@ def erzeuge_rechnung_pdf(
     kunde: Kunde,
     stunden: list[dict[str, Any]],
     auslagen: list[dict[str, Any]],
+    services: list[dict[str, Any]],
     zeitraum: Zeitraum,
     renr: str,
     re_datum: _dt.date,
@@ -219,7 +250,7 @@ def erzeuge_rechnung_pdf(
     freigegeben: True → Hinweis auf eingebettete ZUGFeRD (nur bei finaler Rechnung).
     """
     styles = _styles()
-    pos_zeilen, summen = _positionen(kunde, stunden, auslagen, zeitraum)
+    pos_zeilen, summen = _positionen(kunde, stunden, auslagen, services, zeitraum)
 
     story: list = []
     # Briefkopf: Logo wird auf der ersten Seite direkt auf dem Canvas

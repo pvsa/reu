@@ -1,10 +1,10 @@
 """Stufe 3: Rechnungs-PDF mit reportlab erzeugen.
 
-Pro Kunde eine Rechnung mit:
+Pro Kunde und Zeitraum eine Rechnung mit:
   1. Sammelposition Stunden (Leistungszeitraum, Menge HUR, Stundensatz)
   2. Einzelpositionen Auslagen (je ODS-Zeile)
   3. Summenblock (Netto, USt 19%, Brutto)
-  4. Fuß mit USt-IdNr. beider Parteien, Steuernr., IBAN/BIC, Zahlungsziel,
+  4. Fuß mit USt-IdNr. (soweit vorhanden), IBAN/BIC, Zahlungsziel,
      Rechnungsnummer, Hinweis auf eingebettete E-Rechnung (nur bei Freigabe).
 
 Außerdem wird die Stundentabelle als Anlage-Seite beigelegt.
@@ -35,8 +35,7 @@ from .kunden import Kunde
 from .util import (
     euro,
     menge,
-    jahr_monat_text,
-    leistungszeitraum_iso,
+    Zeitraum,
     UST_PROZENT,
     UST_SATZ,
     UNIT_STUNDE,
@@ -83,8 +82,7 @@ def _positionen(
     kunde: Kunde,
     stunden: list[dict[str, Any]],
     auslagen: list[dict[str, Any]],
-    year: int,
-    month: int,
+    zeitraum: Zeitraum,
 ) -> tuple[list[list[Any]], dict[str, Decimal]]:
     """Baut die Positionstabelle und Summen.
 
@@ -98,12 +96,11 @@ def _positionen(
     ust = (netto * UST_SATZ).quantize(Decimal("0.01"))
     brutto = netto + ust
 
-    zeitraum = f"{jahr_monat_text(year, month)}"
     pos_zeilen: list[list[Any]] = [
         ["Pos.", "Bezeichnung", "Menge", "Einh.", "Einzelpreis", "Netto"],
         [
             "1",
-            f"Beratungsleistung Leistungszeitraum {zeitraum}",
+            f"Beratungsleistung Leistungszeitraum {zeitraum.text}",
             menge(stunden_total),
             UNIT_STUNDE,
             euro(kunde.stundensatz),
@@ -160,11 +157,11 @@ def _summenblock(summen: dict[str, Decimal]) -> Table:
     return t
 
 
-def _stunden_anlage(stunden: list[dict[str, Any]], kunde: Kunde, year: int, month: int) -> list:
+def _stunden_anlage(stunden: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitraum) -> list:
     """Stundentabelle als Anlage-Seite."""
     styles = _styles()
     story: list = []
-    story.append(Paragraph(f"Anlage: Arbeitsstunden {leistungszeitraum_iso(year, month)}", styles["titel"]))
+    story.append(Paragraph(f"Anlage: Arbeitsstunden {zeitraum.text}", styles["titel"]))
     story.append(Paragraph(f"Kunde: {kunde.name} ({kunde.kunde})", styles["normal"]))
     story.append(Spacer(1, 6 * mm))
     data = [["Datum", "Dauer (h)", "Beschreibung"]]
@@ -198,8 +195,7 @@ def erzeuge_rechnung_pdf(
     kunde: Kunde,
     stunden: list[dict[str, Any]],
     auslagen: list[dict[str, Any]],
-    year: int,
-    month: int,
+    zeitraum: Zeitraum,
     renr: str,
     re_datum: _dt.date,
     faelligkeit: _dt.date,
@@ -209,11 +205,11 @@ def erzeuge_rechnung_pdf(
 ) -> dict[str, Decimal]:
     """Erzeugt die Rechnungs-PDF und liefert die Summen zurück.
 
-    entwurf: True → Wasserzeichen ENTWURF, Hinweis „keine E-Rechnung eingebettet".
+    entwurf: True → Wasserzeichen ENTWURF, Hinweis 'keine E-Rechnung eingebettet'.
     freigegeben: True → Hinweis auf eingebettete ZUGFeRD (nur bei finaler Rechnung).
     """
     styles = _styles()
-    pos_zeilen, summen = _positionen(kunde, stunden, auslagen, year, month)
+    pos_zeilen, summen = _positionen(kunde, stunden, auslagen, zeitraum)
 
     story: list = []
     # Logo (optional)
@@ -233,7 +229,7 @@ def erzeuge_rechnung_pdf(
              Paragraph(
                  f"Rechnungsdatum: {re_datum.isoformat()}<br/>"
                  f"Rechnungsnummer: {renr}<br/>"
-                 f"Leistungszeitraum: {leistungszeitraum_iso(year, month)}",
+                 f"Leistungszeitraum: {zeitraum.text}",
                  styles["kopf_rechts"],
              )],
         ],
@@ -282,10 +278,9 @@ def erzeuge_rechnung_pdf(
         f"BIC: {cfg.erechnung.bic}<br/>"
         f"Bank: {cfg.erechnung.bank}<br/>"
         f"USt-IdNr. (Leistender): {cfg.leistender.ust_id}<br/>"
-        f"USt-IdNr. (Kunde): {kunde.ust_id}<br/>"
     )
-    if cfg.leistender.steuernr:
-        fuss_text += f"Steuernr.: {cfg.leistender.steuernr}<br/>"
+    if kunde.ust_id:
+        fuss_text += f"USt-IdNr. (Kunde): {kunde.ust_id}<br/>"
     if freigegeben and not entwurf:
         fuss_text += (
             "<br/>Diese Rechnung enthält eine elektronische Rechnung gem. "
@@ -301,7 +296,7 @@ def erzeuge_rechnung_pdf(
     # Anlage: Stunden
     if stunden:
         story.append(PageBreak())
-        story.extend(_stunden_anlage(stunden, kunde, year, month))
+        story.extend(_stunden_anlage(stunden, kunde, zeitraum))
 
     ausgabe_pfad.parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(

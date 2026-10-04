@@ -3,6 +3,11 @@
 Die Kundendaten werden NICHT hier geladen – das macht kunden.py
 aus der pro-User-ODS-Datei. Hier nur die Konfigurationsdatei (INI)
 mit [leistender], [kunden], [auslagen], [ical], [smtp], [pdf], [erechnung].
+
+Hinweise:
+- smtp_username/smtp_password sind OPTIONAL – nur setzen, wenn der
+  SMTP-Server eine Authentifizierung verlangt (z.B. offener Relay ohne).
+- Eine Steuernummer des Leistenden wird nicht mehr geführt (nur ust_id).
 """
 from __future__ import annotations
 
@@ -28,7 +33,6 @@ class Leistender:
     plz: str
     ort: str
     land: str
-    steuernr: str
     ust_id: str
     leitweg_id: str = ""
 
@@ -130,7 +134,6 @@ def lade_config(user: str, *, basis: Path | None = None) -> Config:
         plz=_get(parser, "leistender", "plz"),
         ort=_get(parser, "leistender", "ort"),
         land=_get(parser, "leistender", "land", fallback="DE"),
-        steuernr=_get(parser, "leistender", "steuernr", fallback=""),
         ust_id=_get(parser, "leistender", "ust_id"),
         leitweg_id=_get(parser, "leistender", "leitweg_id", fallback=""),
     )

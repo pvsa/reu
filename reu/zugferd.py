@@ -4,6 +4,8 @@ Verwendet drafthorse für das XML (CrossIndustryInvoice, Profil EN 16931)
 und drafthorse.pdf.attach_xml für das PDF/A-3 + AF-Embedding.
 
 Mapping (B2B, immer 19% USt, ein Stunden-Sammelposten + Auslagenposten).
+TaxRegistration (USt-IdNr.) wird nur gesetzt, wenn eine USt-IdNr. vorliegt
+(Verkäufer: Pflicht in der Config; Käufer: optional).
 """
 from __future__ import annotations
 
@@ -26,8 +28,7 @@ from .util import (
     UST_PROZENT,
     UNIT_STUNDE,
     UNIT_STUECK,
-    leistungszeitraum_iso,
-    letzter_des_monats,
+    Zeitraum,
 )
 
 GUIDELINE_EN16931 = "urn:cen.eu:en16931:2017"
@@ -49,7 +50,8 @@ def _setz_party(party: Any, name: str, strasse: str, plz: str, ort: str, land: s
     addr.postcode = plz
     addr.city_name = ort
     addr.country_id = land
-    party.tax_registrations.add(TaxRegistration(id=("VA", ust_id)))
+    if ust_id:
+        party.tax_registrations.add(TaxRegistration(id=("VA", ust_id)))
 
 
 def _add_lineitem(
@@ -89,8 +91,7 @@ def erzeuge_xml(
     renr: str,
     re_datum: _dt.date,
     faelligkeit: _dt.date,
-    year: int,
-    month: int,
+    zeitraum: Zeitraum,
 ) -> bytes:
     """Erzeugt validiertes Faktur-X XML (EN 16931)."""
     document = Document()
@@ -125,7 +126,7 @@ def erzeuge_xml(
         leitweg_id=kunde.leitweg_id,
     )
 
-    document.trade.delivery.event.occurrence = letzter_des_monats(year, month)
+    document.trade.delivery.event.occurrence = zeitraum.ende_datum
 
     settlement = document.trade.settlement
     settlement.currency_code = WAehrUNG
@@ -155,7 +156,7 @@ def erzeuge_xml(
     _add_lineitem(
         document,
         line_id="1",
-        name=f"Beratungsleistung Leistungszeitraum {leistungszeitraum_iso(year, month)}",
+        name=f"Beratungsleistung Leistungszeitraum {zeitraum.text}",
         description=f"{stunden_total} Stunden zu je {kunde.stundensatz} EUR",
         menge=stunden_total,
         unit=UNIT_STUNDE,
@@ -211,8 +212,7 @@ def erzeuge_zugferd_pdf(
     renr: str,
     re_datum: _dt.date,
     faelligkeit: _dt.date,
-    year: int,
-    month: int,
+    zeitraum: Zeitraum,
 ) -> Path:
     """Erzeugt XML + PDF/A-3 und schreibt die finale ZUGFeRD-PDF."""
     xml = erzeuge_xml(
@@ -224,8 +224,7 @@ def erzeuge_zugferd_pdf(
         renr=renr,
         re_datum=re_datum,
         faelligkeit=faelligkeit,
-        year=year,
-        month=month,
+        zeitraum=zeitraum,
     )
     pdf_bytes = pdf_pfad.read_bytes()
     zugferd_pdf = bette_xml_in_pdf(pdf_bytes, xml)

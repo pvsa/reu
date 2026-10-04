@@ -3,7 +3,8 @@
 Schema des Blatts 'Kunden' (eine Zeile je Kunde):
     kunde | name | strasse | plz | ort | land | ust_id | leitweg_id | stundensatz
 
-`stundensatz` als DE-Dezimal '95,00' oder EN '95.00' – beides parsebar.
+'stundensatz' als DE-Dezimal '95,00' oder EN '95.00' – beides parsebar.
+'ust_id' ist OPTIONAL (leer = kein Ausweis in PDF-Fuß und ZUGFeRD-XML).
 """
 from __future__ import annotations
 
@@ -14,8 +15,8 @@ from pathlib import Path
 from .ods import blatt_als_dicts
 from .util import dezimal
 
-PFLICHTSPALTEN = ["kunde", "name", "plz", "ort", "land", "ust_id", "stundensatz"]
-OPTIONAL_SPALTEN = ["strasse", "leitweg_id"]
+PFLICHTSPALTEN = ["kunde", "name", "plz", "ort", "land", "stundensatz"]
+OPTIONAL_SPALTEN = ["strasse", "ust_id", "leitweg_id"]
 
 
 class KundenError(Exception):
@@ -39,7 +40,7 @@ def lade_kunden(datei: str | Path, blatt: str = "Kunden") -> dict[str, Kunde]:
     """Liefert {kunde_kuerzel: Kunde}.
 
     Wirft KundenError bei fehlenden Pflichtspalten, Duplikaten oder
-    nicht-numerischem Stundensatz.
+    nicht-numerischem Stundensatz. Die USt-IdNr. muss NICHT gesetzt sein.
     """
     saetze = blatt_als_dicts(datei, blatt)
     if not saetze:
@@ -63,9 +64,6 @@ def lade_kunden(datei: str | Path, blatt: str = "Kunden") -> dict[str, Kunde]:
             raise KundenError(
                 f"Stundensatz für Kunde '{kuerzel}' fehlt oder ist <= 0: {satz.get('stundensatz')!r}"
             )
-        ust_id = str(satz.get("ust_id", "")).strip()
-        if not ust_id:
-            raise KundenError(f"USt-IdNr. fehlt für Kunde '{kuerzel}' (B2B Pflicht)")
         kunden[kuerzel] = Kunde(
             kunde=kuerzel,
             name=str(satz.get("name", "")).strip(),
@@ -73,7 +71,7 @@ def lade_kunden(datei: str | Path, blatt: str = "Kunden") -> dict[str, Kunde]:
             plz=str(satz.get("plz", "")).strip(),
             ort=str(satz.get("ort", "")).strip(),
             land=str(satz.get("land", "DE")).strip().upper(),
-            ust_id=ust_id,
+            ust_id=str(satz.get("ust_id", "")).strip(),
             leitweg_id=str(satz.get("leitweg_id", "")).strip(),
             stundensatz=stundensatz,
         )

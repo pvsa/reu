@@ -1,8 +1,9 @@
 """Stufe 1: Stunden aus iCal-Feed.
 
-Lädt den iCal-Download, parst VEVENTs im angefragten Monat und gruppiert
-nach Kundenkürzel (aus dem SUMMARY-Präfix 'ABC: …' oder der CATEGORIES-
-Eigenschaft). Gibt ein dict {kunde: [Einzeltermine]} zurück.
+Lädt den iCal-Download, parst VEVENTs im angefragten Zeitraum (Einzelmonat,
+Monatsbereich oder Quartal) und gruppiert nach Kundenkürzel (aus dem
+SUMMARY-Präfix 'ABC: …' oder der CATEGORIES-Eigenschaft). Gibt ein
+dict {kunde: [Einzeltermine]} zurück.
 
 Format eines Eintrags:
     {"datum": date, "dauer_h": Decimal, "beschreibung": str}
@@ -12,14 +13,15 @@ from __future__ import annotations
 import datetime as _dt
 import re
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import requests
 from icalendar import Calendar
 import pytz
-from pathlib import Path
 
 from .config import ICalConf
+from .util import Zeitraum
 
 _KUNDE_PREFIX = re.compile(r"^\s*([A-Z0-9_-]{1,10})\s*[:\-]\s*(.*)$")
 
@@ -84,20 +86,23 @@ def _dauer_stunden(start: _dt.datetime, end: _dt.datetime) -> Decimal:
     return stunden.quantize(Decimal("0.01"))
 
 
-def _monat_bereich(year: int, month: int) -> tuple[_dt.datetime, _dt.datetime]:
+def _zeitraum_bereich(zeitraum: Zeitraum) -> tuple[_dt.datetime, _dt.datetime]:
+    """UTC-Bereich: erster Tag des ersten Monats bis exklusiv erster Tag
+    des Folgemonats des letzten Monats."""
     tz = pytz.UTC
-    start = tz.localize(_dt.datetime(year, month, 1)) if _dt.datetime(year, month, 1).tzinfo is None else _dt.datetime(year, month, 1, tzinfo=tz)
-    if month == 12:
-        end = _dt.datetime(year + 1, 1, 1, tzinfo=tz)
+    start = tz.localize(_dt.datetime(zeitraum.jahr, zeitraum.erster_monat, 1))
+    if zeitraum.letzter_monat == 12:
+        naechstes_jahr, naechster_monat = zeitraum.jahr + 1, 1
     else:
-        end = _dt.datetime(year, month + 1, 1, tzinfo=tz)
+        naechstes_jahr, naechster_monat = zeitraum.jahr, zeitraum.letzter_monat + 1
+    end = tz.localize(_dt.datetime(naechstes_jahr, naechster_monat, 1))
     return start, end
 
 
-def lade_stunden(conf: ICalConf, year: int, month: int) -> dict[str, list[dict[str, Any]]]:
+def lade_stunden(conf: ICalConf, zeitraum: Zeitraum) -> dict[str, list[dict[str, Any]]]:
     """Lädt iCal und liefert {kunde: [ {datum, dauer_h, beschreibung} ]}.
 
-    Termine außerhalb des Monats werden ignoriert. Termine ohne Dauer
+    Termine außerhalb des Zeitraums werden ignoriert. Termine ohne Dauer
     (z.B. Ganztages) werden als 0,00 h erfasst und entsprechend ausgewiesen.
     """
     roh = _lade_ical(conf)
@@ -106,7 +111,7 @@ def lade_stunden(conf: ICalConf, year: int, month: int) -> dict[str, list[dict[s
     except Exception as exc:  # noqa: BLE001
         raise ICalError(f"iCal konnte nicht geparsed werden: {exc}") from exc
 
-    start, end = _monat_bereich(year, month)
+    start, end = _zeitraum_bereich(zeitraum)
     ergebnis: dict[str, list[dict[str, Any]]] = {}
 
     for event in cal.walk("VEVENT"):

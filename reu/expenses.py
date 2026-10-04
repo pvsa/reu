@@ -1,8 +1,12 @@
-"""Stufe 2: Auslagen aus der monatlichen ODS-Datei.
+"""Stufe 2: Auslagen aus den monatlichen ODS-Dateien.
 
-Liest das Blatt 'Auslagen' der datei (Pfad aus [auslagen] mit {year}/{month}
-ersetzt), prüft Pflichtspalten und Freigabe-Signal (Meta!A1 == 'yes') und
-gruppiert die Belege nach Kunde.
+Liest das Blatt 'Auslagen' je Monat des Zeitraums (Pfad aus [auslagen] mit
+{year}/{month} ersetzt), prüft Pflichtspalten und Freigabe-Signal
+(Meta!A1 == 'yes') und gruppiert die Belege nach Kunde.
+
+Bei Mehrmonats-Zeiträumen (Monatsbereich/Quartal) werden die Monatsdateien
+zusammengefasst. Fehlende Monatsdateien sind erlaubt – mindestens eine muss
+existieren. Freigabe erfordert 'yes' in ALLEN vorhandenen Monatsdateien.
 
 Rückgabe:
     {
@@ -18,7 +22,7 @@ from typing import Any
 
 from .config import AuslagenConf
 from .ods import blatt_als_dicts, zelle
-from .util import date_to_iso, dezimal
+from .util import Zeitraum, date_to_iso, dezimal
 
 PFLICHTSPALTEN_DEFAULT = ["datum", "kunde", "art", "bezeichnung", "betrag_netto", "belegnr"]
 
@@ -31,18 +35,8 @@ def _aufgeloester_pfad(datei_template: str, year: int, month: int) -> str:
     return datei_template.format(year=year, month=month)
 
 
-def lade_auslagen(
-    conf: AuslagenConf, year: int, month: int, bekannte_kunden: set[str]
-) -> dict[str, Any]:
-    pfad = _aufgeloester_pfad(conf.datei, year, month)
-    p = Path(pfad)
-    if not p.is_absolute() and not p.exists():
-        # relativer Pfad: relativ zur Basis (Konf-Verzeichnis-Oberhalb)
-        # Wir versuchen den Pfad wie angegeben; ansonsten Fehler.
-        pass
-    if not Path(pfad).is_file():
-        raise AuslagenError(f"Auslagen-ODS nicht gefunden: {pfad}")
-
+def _lies_monatsdatei(pfad: str, conf: AuslagenConf) -> tuple[list[dict[str, Any]], bool]:
+    """Liest eine Monats-ODS, prüft Pflichtspalten, liefert (saetze, freigegeben)."""
     saetze = blatt_als_dicts(pfad, conf.blatt)
     pflichtspalten = conf.pflichtspalten or PFLICHTSPALTEN_DEFAULT
     if saetze:
@@ -52,15 +46,36 @@ def lade_auslagen(
             raise AuslagenError(
                 f"Pflichtspalten fehlen in {pfad}!{conf.blatt}: {', '.join(fehlt)}"
             )
-
-    # Freigabe
     freigabe = str(zelle(pfad, "", conf.freigabe_zelle)).strip().lower() == "yes"
-    if not freigabe:
-        # trotzdem laden, damit der Entwurf die Werte anzeigen kann
-        pass
+    return saetze, freigabe
+
+
+def lade_auslagen(
+    conf: AuslagenConf, zeitraum: Zeitraum, bekannte_kunden: set[str]
+) -> dict[str, Any]:
+    """Lädt die Auslagen-ODS je Monat des Zeitraums und fasst sie zusammen."""
+    saetze_alle: list[dict[str, Any]] = []
+    freigegeben = True
+    vorhandene_dateien = 0
+
+    for monat in zeitraum.monate:
+        pfad = _aufgeloester_pfad(conf.datei, zeitraum.jahr, monat)
+        if not Path(pfad).is_file():
+            continue  # Monat ohne Auslagen-Datei ist erlaubt
+        vorhandene_dateien += 1
+        saetze, freigabe = _lies_monatsdatei(pfad, conf)
+        if not freigabe:
+            freigegeben = False
+        saetze_alle.extend(saetze)
+
+    if vorhandene_dateien == 0:
+        erste = _aufgeloester_pfad(conf.datei, zeitraum.jahr, zeitraum.erster_monat)
+        raise AuslagenError(
+            f"Keine Auslagen-ODS für {zeitraum.iso} gefunden (z.B. erwartet: {erste})"
+        )
 
     gruppe: dict[str, list[dict[str, Any]]] = {}
-    for satz in saetze:
+    for satz in saetze_alle:
         kunde = str(satz.get("kunde", "")).strip()
         if not kunde:
             continue
@@ -75,10 +90,9 @@ def lade_auslagen(
                 f"betrag_netto für Beleg {satz.get('belegnr','?')} (Kunde {kunde}) "
                 f"ist nicht numerisch: {satz.get('betrag_netto')!r}"
             )
-        datum = satz.get("datum")
         gruppe.setdefault(kunde, []).append(
             {
-                "datum": date_to_iso(datum) or "",
+                "datum": date_to_iso(satz.get("datum")) or "",
                 "art": str(satz.get("art", "")).strip(),
                 "bezeichnung": str(satz.get("bezeichnung", "")).strip(),
                 "betrag_netto": betrag,
@@ -89,7 +103,7 @@ def lade_auslagen(
     # je Kunde nach Datum sortieren
     for kunde in gruppe:
         gruppe[kunde].sort(key=lambda e: (e["datum"], e["belegnr"]))
-    return {"freigegeben": freigabe, "auslagen": gruppe}
+    return {"freigegeben": freigegeben, "auslagen": gruppe}
 
 
 def auslagen_summe(zeilen: list[dict[str, Any]]) -> Decimal:

@@ -227,7 +227,9 @@ def erzeuge_rechnung_pdf(
     # (Empfänger tiefer gesetzt, wie im klassischen Briefkopf-Layout)
     if cfg.logo_path.is_file():
         try:
-            story.append(Image(str(cfg.logo_path), width=45 * mm, height=20 * mm))
+            logo = Image(str(cfg.logo_path), width=31.5 * mm, height=14 * mm)
+            logo.hAlign = "LEFT"  # Briefkopf: Logo links, nicht zentriert
+            story.append(logo)
             story.append(Spacer(1, 12 * mm))
         except Exception:  # noqa: BLE001
             story.append(Spacer(1, 16 * mm))

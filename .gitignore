@@ -9,11 +9,16 @@ out/dry-run/*
 !out/final/.gitkeep
 !out/dry-run/.gitkeep
 
-# Persistenter State (pro User, nicht einchecken)
-conf/*.state.json
+# Persönliche User-Dateien NICHT einchecken:
+# In conf/ gehören NUR die Beispiel-Dateien ins Repo, alles andere
+# (philipp.conf, philipp-kunden.ods, reale Monats-ODSen etc.) bleibt lokal.
+conf/*
+!conf/alice.conf
+!conf/alice-kunden.ods
+!conf/auslagen_2025-11.ods
 
-# Beispiel-Auslagen nur als Vorlage; reale monatliche ODS nicht einchecken
-# (conf/auslagen_*.ods wird nur als Beispiel gepflegt)
+# Persistenter State (pro User, nicht einchecken) – zusätzlich zu conf/*
+conf/*.state.json
 
 # Logo: lokales pilarkto.net-Logo, nicht für das öffentliche Repo
 logo.jpg

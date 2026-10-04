@@ -123,6 +123,7 @@ def cmd_expenses(cfg: Config, zeitraum: Zeitraum) -> int:
         print(f"Keine Auslagen für {zeitraum.text} (bestätigt).")
         return 0
     print(f"Auslagen {zeitraum.text} – Freigabe: {'JA' if erg['freigegeben'] else 'NEIN (Entwurf)'}")
+    _warne_nicht_freigegeben(erg)
     for k in sorted(erg["auslagen"]):
         kunde = kunden.get(k, None)
         name = kunde.name if kunde else "(unbekannt)"
@@ -149,7 +150,7 @@ def _erzeuge_rechnung(
     re_datum = letzter_des_monats(zeitraum.jahr, zeitraum.letzter_monat)
     faelligkeit = re_datum + _dt.timedelta(days=cfg.erechnung.zahlungsziel_tage)
     # entwurf = keine finale Rechnung (kein XML im PDF-Hinweis, keine echte Re-Nr).
-    # Im Dry-Run wird trotzdem das ZUGFeRD-XML eingebettet, wenn Meta=yes,
+    # Im Dry-Run wird trotzdem das ZUGFeRD-XML eingebettet, wenn freigegeben,
     # damit die PDF inkl. XML geprüft werden kann – aber mit ENTWURF-Re-Nr.
     entwurf = not freigegeben
     renr = state_mod.naechste_renr(state, zeitraum.jahr, dry_run=dry_run)
@@ -193,7 +194,7 @@ def _erzeuge_rechnung(
         )
         pdf_pfad.unlink(missing_ok=True)
     else:
-        # Entwurf (Meta!A1 != yes): keine ZUGFeRD-Einbettung
+        # Entwurf (keine freigegebene Auslagenzeile): keine ZUGFeRD-Einbettung
         pass
 
     state_mod.buche(
@@ -210,6 +211,18 @@ def _erzeuge_rechnung(
         pfad=cfg.state_pfad,
     )
     return {"kunde": kunde.kunde, "renr": renr, "pdf": str(final_pdf), "summen": summen, "entwurf": entwurf}
+
+
+def _warne_nicht_freigegeben(erg: dict) -> None:
+    """Gibt nicht freigegebene (übersprungene) Auslagenzeilen als Warnung aus."""
+    for e in erg.get("nicht_freigegeben", []):
+        if "hinweis" in e:
+            print(f"WARNUNG: {e['datei']}: {e['hinweis']}")
+        else:
+            bez = f"{e['kunde']} {e['bezeichnung']}".strip()
+            if e["belegnr"]:
+                bez += f" (Beleg {e['belegnr']})"
+            print(f"WARNUNG: Auslage nicht freigegeben – übersprungen: {bez} – {e['datei']}")
 
 
 def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: str | None) -> int:
@@ -231,7 +244,8 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
     auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
     if auslagen_erg.get("ohne_dateien"):
         print(f"Hinweis: keine Auslagen für {zeitraum.text} – Rechnung nur mit Stunden/Services.")
-    # freigegeben = Meta!A1 == 'yes' in ALLEN vorhandenen Auslagen-Dateien.
+    _warne_nicht_freigegeben(auslagen_erg)
+    # freigegeben = Spalte 'freigabe' = 'yes' in mindestens EINER Zeile des Zeitraums.
     # Im Dry-Run wird die ZUGFeRD-PDF trotzdem erzeugt (zum Prüfen);
     # Re-Nr/State/Versand steuert dry_run separat.
     freigegeben = auslagen_erg["freigegeben"]

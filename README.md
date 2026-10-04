@@ -36,7 +36,7 @@ Bei Mehrmonats-Zeiträumen gilt:
   Monatsdatei des Zeitraums, fragt das CLI **zu Beginn** um Bestätigung, dass
   ohne Auslagen abgerechnet wird – **Default ist Fortfahren** (Enter oder `j`);
   nur `n`/`nein` bricht ab.
-  Freigabe (Meta!A1 = yes) muss in **allen** vorhandenen Monatsdateien gesetzt sein.
+  Freigabe zeilenweise über die Spalte `freigabe` (siehe unten).
 - **Rechnungsdatum** = letzter Tag des letzten Monats des Zeitraums,
   Zahlungsziel ab diesem Datum.
 
@@ -113,15 +113,20 @@ zusammengefasst.
 
 **Blatt 'Auslagen'** (eine Zeile pro Beleg):
 
-| datum | kunde | art | bezeichnung | betrag_netto | belegnr |
-|-------|-------|-----|-------------|--------------|---------|
+| datum | kunde | art | bezeichnung | betrag_netto | belegnr | freigabe |
+|-------|-------|-----|-------------|--------------|---------|----------|
 
-Pflichtspalten konfigurierbar (pflichtspalten); Standard wie oben.
-'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (immer 19 %).
+Pflichtspalten konfigurierbar (pflichtspalten); Standard wie oben (ohne
+freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (immer 19 %).
 
-**Blatt 'Meta'** (Freigabe-Signal):
-- A1 = 'no' (Standard) → nur Entwurf, kein ZUGFeRD-XML, keine echte Re-Nr.
-- A1 = 'yes' → finale Rechnung, echte Re-Nr, State aktualisiert, ZUGFeRD erzeugt.
+**Freigabe zeilenweise** über die Spalte `freigabe` (Name konfigurierbar
+über [auslagen] freigabe_spalte, Default `freigabe`):
+
+- `yes` → Zeile wird abgerechnet (Groß-/Kleinschreibung egal).
+- leer/`no` → Zeile wird **übersprungen** (Ausgabe: WARNUNG je Zeile).
+- Die Rechnung ist **finale** (echte Re-Nr, State, ZUGFeRD, Versand), sobald
+  **mindestens eine** Zeile des Zeitraums `yes` hat – sonst ENTWURF.
+- Fehlt die Spalte komplett: keine Zeile freigegeben → ENTWURF + WARNUNG.
 
 ## CLI
 
@@ -132,7 +137,7 @@ Pflichtspalten konfigurierbar (pflichtspalten); Standard wie oben.
 # Nur Auslagen aus ODS prüfen
 ./run-reu.py alice 11 2025 --expenses
 
-# Rechnungsentwurf (Meta!A1 ≠ yes → ENTWURF, kein XML, kein Versand, kein State)
+# Rechnungsentwurf (keine Zeile mit freigabe=yes → ENTWURF, kein XML, kein Versand, kein State)
 ./run-reu.py alice 11 2025 --invoice
 
 # QUARTALSABRECHNUNG: Oktober bis Dezember in einer Rechnung je Kunde
@@ -142,10 +147,10 @@ Pflichtspalten konfigurierbar (pflichtspalten); Standard wie oben.
 ./run-reu.py alice 11-12 2025 --full
 
 # Rechnung zum Prüfen mit eingebettetem ZUGFeRD-XML, aber OHNE Versand
-# (Meta!A1 = yes vorausgesetzt). Re-Nr bleibt ENTWURF-…, kein State.
+# (freigabe=yes in mindestens einer Zeile vorausgesetzt). Re-Nr bleibt ENTWURF-…, kein State.
 ./run-reu.py alice Q1 2025 --full --dry-run
 
-# Finale Rechnung + ZUGFeRD + Versand + Journal (Meta!A1 = yes vorausgesetzt)
+# Finale Rechnung + ZUGFeRD + Versand + Journal (freigabe=yes vorausgesetzt)
 ./run-reu.py alice 11 2025 --full
 
 # Rechnungsübersicht aus State (fürs Finanzamt)
@@ -163,14 +168,14 @@ wird nur die Hilfe ausgegeben – keine Ausführung.
 | Aktion | normal | --dry-run |
 |--------|--------|-----------|
 | Rechnungs-PDF erzeugen | ✓ | ✓ |
-| ZUGFeRD-XML + PDF/A-3-Embedding (nur bei Meta=yes) | ✓ | ✓ — damit PDF+XML prüfbar |
+| ZUGFeRD-XML + PDF/A-3-Embedding (nur bei freigabe=yes) | ✓ | ✓ — damit PDF+XML prüfbar |
 | Re-Nr vergeben + State schreiben | ✓ | ✗ — verwendet ENTWURF-… |
 | E-Mail-Versand | ✓ | ✗ — komplett übersprungen |
 | Ausgabe in | out/final/ | out/dry-run/ |
 
-Meta!A1 und --dry-run sind orthogonal: Meta!A1 steuert Entwurf-vs-finale-Logik
+Die Freigabe-Spalte und --dry-run sind orthogonal: freigabe steuert Entwurf-vs-finale-Logik
 (XML ja/nein), --dry-run steuert Seiteneffekte (Versand, State, Re-Nr). So kann
-auch bei versehentlich gesetztem Meta!A1 = yes nichts nach draußen gehen und
+auch bei versehentlich freigegebenen Zeilen nichts nach draußen gehen und
 keine Nummer verbraucht werden.
 
 ## Rechnungsnummer

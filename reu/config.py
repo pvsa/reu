@@ -52,7 +52,7 @@ class AuslagenConf:
     quelle: str = "ods"
     datei: str = ""
     blatt: str = "Auslagen"
-    freigabe_zelle: str = "Meta!A1"
+    freigabe_spalte: str = "freigabe"
     pflichtspalten: list[str] = field(
         default_factory=lambda: ["datum", "kunde", "art", "bezeichnung", "betrag_netto", "belegnr"]
     )
@@ -155,7 +155,7 @@ def lade_config(user: str, *, basis: Path | None = None) -> Config:
         quelle=_get(parser, "auslagen", "quelle", fallback="ods"),
         datei=_get(parser, "auslagen", "datei"),
         blatt=_get(parser, "auslagen", "blatt", fallback="Auslagen"),
-        freigabe_zelle=_get(parser, "auslagen", "freigabe_zelle", fallback="Meta!A1"),
+        freigabe_spalte=_get(parser, "auslagen", "freigabe_spalte", fallback="freigabe"),
         pflichtspalten=pflichtspalten,
     )
 

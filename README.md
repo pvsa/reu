@@ -195,7 +195,9 @@ python3 -m pip install drafthorse reportlab requests icalendar pytz
 [ical] url kann 'https://…', 'http://…' oder 'file://…' sein.
 Ein Termineintrag braucht ein Kundenkürzel im SUMMARY-Präfix ('ABC: …')
 oder in der CATEGORIES-Eigenschaft. Termine außerhalb des angefragten
-Zeitraums werden ignoriert.
+Zeitraums werden ignoriert. Termine **ohne** Kürzel (z.B. interne/
+technische Einträge wie Backups) gelten als nicht abrechenbar: sie werden
+mit einem Hinweis auf stderr übersprungen – der Lauf bricht nicht ab.
 
 ## Validierung der ZUGFeRD-PDF (Pflicht)
 

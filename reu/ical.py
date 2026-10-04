@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
+import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -64,7 +65,13 @@ def _lade_ical(conf: ICalConf) -> bytes:
     ) from letzter_fehler
 
 
-def _kunde_aus_event(event: Any) -> tuple[str, str]:
+def _kunde_aus_event(event: Any) -> tuple[str, str] | None:
+    """Kürzel aus SUMMARY-Präfix oder CATEGORIES.
+
+    Liefert (kuerzel, beschreibung) oder None, wenn der Termin kein
+    Kürzel trägt – solche Termine sind nicht abrechenbar (interne/
+    technische Einträge wie Backups) und werden übersprungen.
+    """
     summary = str(event.get("summary") or "")
     m = _KUNDE_PREFIX.match(summary)
     if m:
@@ -74,9 +81,7 @@ def _kunde_aus_event(event: Any) -> tuple[str, str]:
         cats = [str(c) for c in cat.cats] if hasattr(cat, "cats") else [str(cat)]
         if cats:
             return cats[0].strip(), summary
-    raise ICalError(
-        f"Event ohne Kundenkürzel (SUMMARY='{summary}') – Präfix 'ABC: …' erwartet"
-    )
+    return None
 
 
 def _dauer_stunden(start: _dt.datetime, end: _dt.datetime) -> Decimal:
@@ -113,6 +118,7 @@ def lade_stunden(conf: ICalConf, zeitraum: Zeitraum) -> dict[str, list[dict[str,
 
     start, end = _zeitraum_bereich(zeitraum)
     ergebnis: dict[str, list[dict[str, Any]]] = {}
+    ohne_kuerzel: list[str] = []
 
     for event in cal.walk("VEVENT"):
         dtstart = event.get("dtstart")
@@ -134,7 +140,14 @@ def lade_stunden(conf: ICalConf, zeitraum: Zeitraum) -> dict[str, list[dict[str,
             continue
         if not (ev_start < end and ev_end > start):
             continue
-        kunde, beschreibung = _kunde_aus_event(event)
+        kunde_aus_event = _kunde_aus_event(event)
+        if kunde_aus_event is None:
+            summary = str(event.get("summary") or "").strip()
+            ohne_kuerzel.append(
+                f"{ev_start.astimezone(pytz.UTC).date()}: {summary or '(ohne SUMMARY)'}"
+            )
+            continue
+        kunde, beschreibung = kunde_aus_event
         dauer = _dauer_stunden(ev_start, ev_end)
         ergebnis.setdefault(kunde, []).append(
             {
@@ -143,6 +156,18 @@ def lade_stunden(conf: ICalConf, zeitraum: Zeitraum) -> dict[str, list[dict[str,
                 "beschreibung": beschreibung or str(event.get("summary") or ""),
             }
         )
+
+    # Hinweis auf übersprungene, nicht abrechenbare Termine
+    if ohne_kuerzel:
+        print(
+            f"Hinweis: {len(ohne_kuerzel)} Termin(e) ohne Kundenkürzel übersprungen "
+            "(nicht abrechenbar, Präfix 'ABC: …' fehlt):",
+            file=sys.stderr,
+        )
+        for eintrag in ohne_kuerzel[:10]:
+            print(f"  {eintrag}", file=sys.stderr)
+        if len(ohne_kuerzel) > 10:
+            print(f"  … und {len(ohne_kuerzel) - 10} weitere", file=sys.stderr)
 
     # sortieren nach Datum
     for kunde in ergebnis:

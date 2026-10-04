@@ -71,12 +71,18 @@ def cmd_hours(cfg: Config, zeitraum: Zeitraum) -> int:
     print(f"Stunden {zeitraum.text}:")
     for k in sorted(stunden):
         kunde = kunden.get(k)
-        name = kunde.name if kunde else "(unbekannt)"
         total = ical_mod.stunden_summe(stunden[k])
-        print(f"\n=== {k} – {name} ({euro(kunde.stundensatz)}/h) ===")
+        if kunde is None:
+            print(f"\n=== {k} – UNBEKANNTES KÜRZEL (fehlt in {cfg.kunden.datei}) ===")
+            for e in stunden[k]:
+                print(f"  {e['datum'].isoformat()}  {e['dauer_h']:>6} h  {e['beschreibung']}")
+            print(f"  Summe: {total} h  → kein Stundensatz, keine Berechnung")
+            print(f"  Bitte '{k}' in der kunden.ods ergänzen (oder Termin-Kürzel korrigieren).")
+            continue
+        print(f"\n=== {k} – {kunde.name} ({euro(kunde.stundensatz)}/h) ===")
         for e in stunden[k]:
             print(f"  {e['datum'].isoformat()}  {e['dauer_h']:>6} h  {e['beschreibung']}")
-        print(f"  Summe: {total} h  → Netto {euro(total * kunde.stundensatz) if kunde else '?'}")
+        print(f"  Summe: {total} h  → Netto {euro(total * kunde.stundensatz)}")
     return 0
 
 

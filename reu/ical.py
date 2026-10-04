@@ -2,7 +2,8 @@
 
 Lädt den iCal-Download, parst VEVENTs im angefragten Zeitraum (Einzelmonat,
 Monatsbereich oder Quartal) und gruppiert nach Kundenkürzel (aus dem
-SUMMARY-Präfix 'ABC: …' oder der CATEGORIES-Eigenschaft). Gibt ein
+SUMMARY-Präfix, exakt drei Zeichen direkt gefolgt von einem Doppelpunkt,
+z.B. 'ZTR: …', oder der CATEGORIES-Eigenschaft). Gibt ein
 dict {kunde: [Einzeltermine]} zurück.
 
 Format eines Eintrags:
@@ -23,7 +24,8 @@ import pytz
 from .config import ICalConf
 from .util import Zeitraum
 
-_KUNDE_PREFIX = re.compile(r"^\s*([A-Z0-9_-]{1,10})\s*[:\-]\s*(.*)$")
+# Kürzel: exakt drei Zeichen (A-Z, 0-9), direkt gefolgt vom Doppelpunkt
+_KUNDE_PREFIX = re.compile(r"^\s*([A-Z0-9]{3}):(.*)$")
 
 
 class ICalError(Exception):
@@ -67,9 +69,11 @@ def _lade_ical(conf: ICalConf) -> bytes:
 def _kunde_aus_event(event: Any) -> tuple[str, str] | None:
     """Kürzel aus SUMMARY-Präfix oder CATEGORIES.
 
-    Liefert (kuerzel, beschreibung) oder None, wenn der Termin kein
-    Kürzel trägt – solche Termine sind nicht abrechenbar (interne/
-    technische Einträge wie Backups) und werden übersprungen.
+    Akzeptiert wird ein Kürzel aus exakt drei Zeichen (A-Z, 0-9),
+    dem unmittelbar ein Doppelpunkt folgt ('ZTR: …', nicht 'NOD25:'
+    oder 'HA:'). Liefert (kuerzel, beschreibung) oder None, wenn der
+    Termin kein Kürzel trägt – solche Termine sind nicht abrechenbar
+    (interne/technische Einträge wie Backups) und werden übersprungen.
     """
     summary = str(event.get("summary") or "")
     m = _KUNDE_PREFIX.match(summary)

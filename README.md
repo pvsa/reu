@@ -193,8 +193,10 @@ python3 -m pip install drafthorse reportlab requests icalendar pytz
 ## iCal-Feed
 
 [ical] url kann 'https://…', 'http://…' oder 'file://…' sein.
-Ein Termineintrag braucht ein Kundenkürzel im SUMMARY-Präfix ('ABC: …')
-oder in der CATEGORIES-Eigenschaft. Termine außerhalb des angefragten
+Ein Termineintrag braucht ein Kundenkürzel im SUMMARY-Präfix: **exakt
+drei Zeichen, direkt gefolgt von einem Doppelpunkt** ('ZTR: …' – nicht
+'NOD25:' oder 'HA:'), oder ein Kürzel in der CATEGORIES-Eigenschaft.
+Termine außerhalb des angefragten
 Zeitraums werden ignoriert. Termine **ohne** Kürzel (z.B. interne/
 technische Einträge wie Backups) gelten als nicht abrechenbar und werden
 stillschweigend übersprungen – der Lauf bricht nicht ab.

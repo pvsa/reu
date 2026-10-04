@@ -92,7 +92,9 @@ Pflicht: kunde, name, plz, ort, land, stundensatz.
 Optional: strasse, leitweg_id (B2B optional, B2G Pflicht) und **ust_id**.
 Eine leere ust_id ist erlaubt: sie wird dann weder im PDF-Fuß noch im
 ZUGFeRD-XML (TaxRegistration VA) ausgewiesen.
-'stundensatz' als DE-Dezimal '95,00' oder EN '95.00'.
+'stundensatz' als DE-Dezimal '95,00' oder EN '95.00'. **'0,00' ist erlaubt**
+(Kunde ohne Honorar, z.B. nur Auslagen/Services; Stunden erscheinen dann mit
+0,00 € auf der Rechnung). Negativ ist unzulässig.
 
 **Blatt 'Services' (optional, eine Zeile je Kunde und Service):**
 

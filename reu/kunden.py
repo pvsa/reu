@@ -4,6 +4,8 @@ Schema des Blatts 'Kunden' (eine Zeile je Kunde):
     kunde | name | strasse | plz | ort | land | ust_id | leitweg_id | stundensatz
 
 'stundensatz' als DE-Dezimal '95,00' oder EN '95.00' – beides parsebar.
+'0,00' ist erlaubt (Kunde ohne Honorar, z.B. nur Auslagen/Services);
+negativ ist unzulässig.
 'ust_id' ist OPTIONAL (leer = kein Ausweis in PDF-Fuß und ZUGFeRD-XML).
 """
 from __future__ import annotations
@@ -39,8 +41,9 @@ class Kunde:
 def lade_kunden(datei: str | Path, blatt: str = "Kunden") -> dict[str, Kunde]:
     """Liefert {kunde_kuerzel: Kunde}.
 
-    Wirft KundenError bei fehlenden Pflichtspalten, Duplikaten oder
-    nicht-numerischem Stundensatz. Die USt-IdNr. muss NICHT gesetzt sein.
+    Wirft KundenError bei fehlenden Pflichtspalten, Duplikaten, nicht-
+    numerischem oder negativem Stundensatz. '0,00' ist erlaubt.
+    Die USt-IdNr. muss NICHT gesetzt sein.
     """
     saetze = blatt_als_dicts(datei, blatt)
     if not saetze:
@@ -60,9 +63,9 @@ def lade_kunden(datei: str | Path, blatt: str = "Kunden") -> dict[str, Kunde]:
         if kuerzel in kunden:
             raise KundenError(f"Kunde '{kuerzel}' mehrfach in {datei}!{blatt}")
         stundensatz = dezimal(satz.get("stundensatz"))
-        if stundensatz <= 0:
+        if stundensatz < 0:
             raise KundenError(
-                f"Stundensatz für Kunde '{kuerzel}' fehlt oder ist <= 0: {satz.get('stundensatz')!r}"
+                f"Stundensatz für Kunde '{kuerzel}' ist negativ: {satz.get('stundensatz')!r}"
             )
         kunden[kuerzel] = Kunde(
             kunde=kuerzel,

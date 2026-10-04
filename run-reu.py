@@ -62,6 +62,27 @@ def _drucke_tabelle(zeilen: list[list[str]], kopf: list[str]) -> None:
         print(fmt(r))
 
 
+
+def _bestaetige_keine_auslagen(cfg: Config, zeitraum: Zeitraum) -> bool:
+    """Fragt den Nutzer, ob ohne Auslagen-Datei weitergearbeitet werden darf.
+
+    Bestätigung mit 'j'/'ja' (auch 'y'/'yes'); alles andere (inkl. Enter)
+    bricht ab. Bei nicht-interaktiver Eingabe (EOF) wird abgebrochen.
+    """
+    erste = cfg.auslagen.datei.format(year=zeitraum.jahr, month=zeitraum.erster_monat)
+    frage = (
+        f"Keine Auslagen-ODS für {zeitraum.text} gefunden "
+        f"(z.B. erwartet: {erste}).\n"
+        "Ohne Auslagen fortfahren? [j/N]: "
+    )
+    try:
+        antwort = input(frage).strip().lower()
+    except EOFError:
+        print("\nKeine Eingabe möglich – Abbruch.")
+        return False
+    return antwort in {"j", "ja", "y", "yes"}
+
+
 def cmd_hours(cfg: Config, zeitraum: Zeitraum) -> int:
     kunden = _lade_kunden(cfg)
     stunden = ical_mod.lade_stunden(cfg.ical, zeitraum)
@@ -89,6 +110,12 @@ def cmd_hours(cfg: Config, zeitraum: Zeitraum) -> int:
 def cmd_expenses(cfg: Config, zeitraum: Zeitraum) -> int:
     kunden = _lade_kunden(cfg)
     erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
+    if erg.get("ohne_dateien"):
+        if not _bestaetige_keine_auslagen(cfg, zeitraum):
+            print("Abbruch durch Nutzer – Auslagen-Prüfung ohne Bestätigung beendet.")
+            return 1
+        print(f"Keine Auslagen für {zeitraum.text} (durch Nutzer bestätigt).")
+        return 0
     print(f"Auslagen {zeitraum.text} – Freigabe: {'JA' if erg['freigegeben'] else 'NEIN (Entwurf)'}")
     for k in sorted(erg["auslagen"]):
         kunde = kunden.get(k, None)
@@ -180,6 +207,11 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
     kunden = _lade_kunden(cfg)
     stunden_alle = ical_mod.lade_stunden(cfg.ical, zeitraum)
     auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
+    if auslagen_erg.get("ohne_dateien"):
+        if not _bestaetige_keine_auslagen(cfg, zeitraum):
+            print("Abbruch durch Nutzer – keine Rechnungen erzeugt.")
+            return 1
+        print(f"Hinweis: keine Auslagen für {zeitraum.text} (durch Nutzer bestätigt) – Rechnung nur mit Stunden.")
     # freigegeben = Meta!A1 == 'yes' in ALLEN vorhandenen Auslagen-Dateien.
     # Im Dry-Run wird die ZUGFeRD-PDF trotzdem erzeugt (zum Prüfen);
     # Re-Nr/State/Versand steuert dry_run separat.

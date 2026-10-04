@@ -32,9 +32,10 @@ Bei Mehrmonats-Zeiträumen gilt:
 - **iCal**: alle Termine vom ersten Tag des ersten bis zum letzten Tag des
   letzten Monats (Zeitzonen werden normalisiert).
 - **Auslagen**: die Monats-ODSen werden je Monat geladen ({year}/{month}-
-  Template) und zusammengefasst. Fehlende Monatsdateien sind erlaubt,
-  mindestens eine muss existieren. Freigabe (Meta!A1 = yes) muss in
-  **allen** vorhandenen Monatsdateien gesetzt sein.
+  Template) und zusammengefasst. Fehlende Monatsdateien sind erlaubt. Existiert **keine**
+  Monatsdatei des Zeitraums, fragt das CLI vor dem Fortfahren um
+  Bestätigung, dass ohne Auslagen abgerechnet wird (Abbruch mit Enter).
+  Freigabe (Meta!A1 = yes) muss in **allen** vorhandenen Monatsdateien gesetzt sein.
 - **Rechnungsdatum** = letzter Tag des letzten Monats des Zeitraums,
   Zahlungsziel ab diesem Datum.
 

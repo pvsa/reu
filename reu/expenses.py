@@ -5,13 +5,17 @@ Liest das Blatt 'Auslagen' je Monat des Zeitraums (Pfad aus [auslagen] mit
 (Meta!A1 == 'yes') und gruppiert die Belege nach Kunde.
 
 Bei Mehrmonats-Zeiträumen (Monatsbereich/Quartal) werden die Monatsdateien
-zusammengefasst. Fehlende Monatsdateien sind erlaubt – mindestens eine muss
-existieren. Freigabe erfordert 'yes' in ALLEN vorhandenen Monatsdateien.
+zusammengefasst. Fehlende Monatsdateien sind erlaubt. Existiert KEINE
+Monatsdatei des Zeitraums, wird kein Fehler geworfen, sondern
+"ohne_dateien": True geliefert – das CLI fragt dann den Nutzer um
+Bestätigung, dass ohne Auslagen abgerechnet wird. Freigabe erfordert 'yes'
+in ALLEN vorhandenen Monatsdateien.
 
 Rückgabe:
     {
       "freigegeben": bool,
       "auslagen": {kunde: [ {datum, art, bezeichnung, betrag_netto, belegnr} ]},
+      "ohne_dateien": bool,   # True: keine Auslagen-Datei im Zeitraum vorhanden
     }
 """
 from __future__ import annotations
@@ -69,10 +73,9 @@ def lade_auslagen(
         saetze_alle.extend(saetze)
 
     if vorhandene_dateien == 0:
-        erste = _aufgeloester_pfad(conf.datei, zeitraum.jahr, zeitraum.erster_monat)
-        raise AuslagenError(
-            f"Keine Auslagen-ODS für {zeitraum.iso} gefunden (z.B. erwartet: {erste})"
-        )
+        # Keine Auslagen-Datei im gesamten Zeitraum: kein Abbruch,
+        # das CLI holt eine Nutzer-Bestätigung ein (siehe run-reu.py).
+        return {"freigegeben": False, "auslagen": {}, "ohne_dateien": True}
 
     gruppe: dict[str, list[dict[str, Any]]] = {}
     for satz in saetze_alle:
@@ -103,7 +106,7 @@ def lade_auslagen(
     # je Kunde nach Datum sortieren
     for kunde in gruppe:
         gruppe[kunde].sort(key=lambda e: (e["datum"], e["belegnr"]))
-    return {"freigegeben": freigegeben, "auslagen": gruppe}
+    return {"freigegeben": freigegeben, "auslagen": gruppe, "ohne_dateien": False}
 
 
 def auslagen_summe(zeilen: list[dict[str, Any]]) -> Decimal:

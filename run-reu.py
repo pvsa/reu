@@ -8,6 +8,7 @@ Aufruf:
     ./run-reu.py <user> <month> <year> --full [--dry-run]
     ./run-reu.py <user> --journal <year>
 
+<month> erlaubt: Einzelmonat (11), Monatsbereich (10-12) oder Quartal (Q4).
 Ohne Action-Flag wird nur die Hilfe angezeigt (keine Ausführung).
 """
 from __future__ import annotations
@@ -30,7 +31,13 @@ from reu import (
 )
 from reu.config import Config
 from reu.kunden import Kunde
-from reu.util import euro, leistungszeitraum_iso, letzter_des_monats
+from reu.util import (
+    euro,
+    letzter_des_monats,
+    parse_zeitraum,
+    Zeitraum,
+    ZeitraumError,
+)
 
 
 def _ausgabe_verzeichnis(cfg: Config, dry_run: bool) -> Path:
@@ -44,7 +51,6 @@ def _lade_kunden(cfg: Config) -> dict[str, Kunde]:
 
 
 def _drucke_tabelle(zeilen: list[list[str]], kopf: list[str]) -> None:
-    breiten = [len(kopf)]
     matrix = [kopf] + zeilen
     spalten = len(kopf)
     breiten = [max(len(str(r[i])) for r in matrix if i < len(r)) for i in range(spalten)]
@@ -56,13 +62,13 @@ def _drucke_tabelle(zeilen: list[list[str]], kopf: list[str]) -> None:
         print(fmt(r))
 
 
-def cmd_hours(cfg: Config, month: int, year: int) -> int:
+def cmd_hours(cfg: Config, zeitraum: Zeitraum) -> int:
     kunden = _lade_kunden(cfg)
-    stunden = ical_mod.lade_stunden(cfg.ical, year, month)
+    stunden = ical_mod.lade_stunden(cfg.ical, zeitraum)
     if not stunden:
-        print(f"Keine Termine im Leistungszeitraum {leistungszeitraum_iso(year, month)} gefunden.")
+        print(f"Keine Termine im Leistungszeitraum {zeitraum.text} gefunden.")
         return 0
-    print(f"Stunden {leistungszeitraum_iso(year, month)}:")
+    print(f"Stunden {zeitraum.text}:")
     for k in sorted(stunden):
         kunde = kunden.get(k)
         name = kunde.name if kunde else "(unbekannt)"
@@ -74,10 +80,10 @@ def cmd_hours(cfg: Config, month: int, year: int) -> int:
     return 0
 
 
-def cmd_expenses(cfg: Config, month: int, year: int) -> int:
+def cmd_expenses(cfg: Config, zeitraum: Zeitraum) -> int:
     kunden = _lade_kunden(cfg)
-    erg = expenses_mod.lade_auslagen(cfg.auslagen, year, month, set(kunden))
-    print(f"Auslagen {leistungszeitraum_iso(year, month)} – Freigabe: {'JA' if erg['freigegeben'] else 'NEIN (Entwurf)'}")
+    erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
+    print(f"Auslagen {zeitraum.text} – Freigabe: {'JA' if erg['freigegeben'] else 'NEIN (Entwurf)'}")
     for k in sorted(erg["auslagen"]):
         kunde = kunden.get(k, None)
         name = kunde.name if kunde else "(unbekannt)"
@@ -94,19 +100,19 @@ def _erzeuge_rechnung(
     kunde: Kunde,
     stunden: list[dict],
     auslagen: list[dict],
-    month: int,
-    year: int,
+    zeitraum: Zeitraum,
     state: state_mod.State,
     dry_run: bool,
     freigegeben: bool,
 ) -> dict:
-    re_datum = letzter_des_monats(year, month)
+    # Rechnungsdatum = letzter Tag des letzten Monats des Zeitraums
+    re_datum = letzter_des_monats(zeitraum.jahr, zeitraum.letzter_monat)
     faelligkeit = re_datum + _dt.timedelta(days=cfg.erechnung.zahlungsziel_tage)
     # entwurf = keine finale Rechnung (kein XML im PDF-Hinweis, keine echte Re-Nr).
     # Im Dry-Run wird trotzdem das ZUGFeRD-XML eingebettet, wenn Meta=yes,
     # damit die PDF inkl. XML geprüft werden kann – aber mit ENTWURF-Re-Nr.
     entwurf = not freigegeben
-    renr = state_mod.naechste_renr(state, year, dry_run=dry_run)
+    renr = state_mod.naechste_renr(state, zeitraum.jahr, dry_run=dry_run)
 
     out_verz = _ausgabe_verzeichnis(cfg, dry_run)
     basis_name = f"{kunde.kunde}_Rechnung_{renr}.pdf"
@@ -117,8 +123,7 @@ def _erzeuge_rechnung(
         kunde=kunde,
         stunden=stunden,
         auslagen=auslagen,
-        year=year,
-        month=month,
+        zeitraum=zeitraum,
         renr=renr,
         re_datum=re_datum,
         faelligkeit=faelligkeit,
@@ -142,8 +147,7 @@ def _erzeuge_rechnung(
             renr=renr,
             re_datum=re_datum,
             faelligkeit=faelligkeit,
-            year=year,
-            month=month,
+            zeitraum=zeitraum,
         )
         pdf_pfad.unlink(missing_ok=True)
     else:
@@ -155,7 +159,7 @@ def _erzeuge_rechnung(
         renr=renr,
         kunde=kunde.kunde,
         datum=re_datum,
-        leistungszeitraum=leistungszeitraum_iso(year, month),
+        leistungszeitraum=zeitraum.iso,
         netto=summen["netto"],
         ust=summen["ust"],
         brutto=summen["brutto"],
@@ -166,12 +170,13 @@ def _erzeuge_rechnung(
     return {"kunde": kunde.kunde, "renr": renr, "pdf": str(final_pdf), "summen": summen, "entwurf": entwurf}
 
 
-def cmd_invoice(cfg: Config, month: int, year: int, *, dry_run: bool, nur_kunde: str | None) -> int:
+def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: str | None) -> int:
     kunden = _lade_kunden(cfg)
-    stunden_alle = ical_mod.lade_stunden(cfg.ical, year, month)
-    auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, year, month, set(kunden))
-    # freigegeben = Meta!A1 == 'yes'. Im Dry-Run wird die ZUGFeRD-PDF trotzdem
-    # erzeugt (zum Prüfen); Re-Nr/State/Versand steuert dry_run separat.
+    stunden_alle = ical_mod.lade_stunden(cfg.ical, zeitraum)
+    auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
+    # freigegeben = Meta!A1 == 'yes' in ALLEN vorhandenen Auslagen-Dateien.
+    # Im Dry-Run wird die ZUGFeRD-PDF trotzdem erzeugt (zum Prüfen);
+    # Re-Nr/State/Versand steuert dry_run separat.
     freigegeben = auslagen_erg["freigegeben"]
     state = state_mod.lade_state(cfg.state_pfad)
 
@@ -192,7 +197,7 @@ def cmd_invoice(cfg: Config, month: int, year: int, *, dry_run: bool, nur_kunde:
         auslagen = auslagen_erg["auslagen"].get(k, [])
         if not stunden and not auslagen:
             continue
-        erg = _erzeuge_rechnung(cfg, kunde, stunden, auslagen, month, year, state, dry_run, freigegeben)
+        erg = _erzeuge_rechnung(cfg, kunde, stunden, auslagen, zeitraum, state, dry_run, freigegeben)
         ergebnisse.append(erg)
         print(f"{'ENTWURF ' if erg['entwurf'] else 'FINALE  '}{k}: {erg['renr']}  Netto {euro(erg['summen']['netto'])}  Brutto {euro(erg['summen']['brutto'])}  → {erg['pdf']}")
 
@@ -201,8 +206,8 @@ def cmd_invoice(cfg: Config, month: int, year: int, *, dry_run: bool, nur_kunde:
     return 0
 
 
-def cmd_full(cfg: Config, month: int, year: int, *, dry_run: bool, nur_kunde: str | None) -> int:
-    rc = cmd_invoice(cfg, month, year, dry_run=dry_run, nur_kunde=nur_kunde)
+def cmd_full(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: str | None) -> int:
+    rc = cmd_invoice(cfg, zeitraum, dry_run=dry_run, nur_kunde=nur_kunde)
     if dry_run:
         return rc
     # Versand nur im echten Lauf
@@ -213,7 +218,7 @@ def cmd_full(cfg: Config, month: int, year: int, *, dry_run: bool, nur_kunde: st
     for b in state.buchungen:
         if b.entwurf:
             continue
-        if not b.leistungszeitraum == leistungszeitraum_iso(year, month):
+        if not b.leistungszeitraum == zeitraum.iso:
             continue
         pdf_name = f"{b.kunde}_Rechnung_{b.renr}_ZUGFeRD.pdf"
         pdf_pfad = out_verz / pdf_name
@@ -265,7 +270,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="REU – Rechnungserstellung (Stunden + Auslagen + ZUGFeRD).",
     )
     p.add_argument("user", help="Konfigurationsname, z.B. alice")
-    p.add_argument("month", nargs="?", type=int, help="Monat (1-12)")
+    p.add_argument(
+        "month",
+        nargs="?",
+        help="Zeitraum: Monat (1-12), Bereich (z.B. 10-12) oder Quartal (Q1-Q4)",
+    )
     p.add_argument("year", nargs="?", type=int, help="Jahr (z.B. 2025)")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--hours", action="store_true", help="Nur Stunden aus iCal anzeigen")
@@ -298,8 +307,14 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_journal(cfg, args.jyear or 0)
 
     if not args.month or not args.year:
-        print("Für --hours/--expenses/--invoice/--full sind Monat und Jahr Pflicht.")
+        print("Für --hours/--expenses/--invoice/--full sind Zeitraum und Jahr Pflicht.")
         parser.print_help()
+        return 2
+
+    try:
+        zeitraum = parse_zeitraum(args.month, args.year)
+    except ZeitraumError as exc:
+        print(f"Zeitraum-Fehler: {exc}")
         return 2
 
     try:
@@ -310,13 +325,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.hours:
-            return cmd_hours(cfg, args.month, args.year)
+            return cmd_hours(cfg, zeitraum)
         if args.expenses:
-            return cmd_expenses(cfg, args.month, args.year)
+            return cmd_expenses(cfg, zeitraum)
         if args.invoice:
-            return cmd_invoice(cfg, args.month, args.year, dry_run=args.dry_run, nur_kunde=args.kunde)
+            return cmd_invoice(cfg, zeitraum, dry_run=args.dry_run, nur_kunde=args.kunde)
         if args.full:
-            return cmd_full(cfg, args.month, args.year, dry_run=args.dry_run, nur_kunde=args.kunde)
+            return cmd_full(cfg, zeitraum, dry_run=args.dry_run, nur_kunde=args.kunde)
     except Exception as exc:  # noqa: BLE001
         print(f"FEHLER: {exc}")
         return 1

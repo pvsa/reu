@@ -23,6 +23,7 @@ Rückgabe von lade_auslagen:
       "freigegeben": bool,      # True, sobald eine Zeitraum-Zeile yes/ja hat
       "auslagen": {kunde: [ {datum, art, bezeichnung, betrag_netto, belegnr} ]},
       "nicht_freigegeben": [ {kunde, bezeichnung, belegnr} | {hinweis} ],
+      "offene_zeilen": {kunde: anzahl},  # nicht freigegebene Zeilen je Kunde
       "zeitraum_zeilen": int,   # Zeilen im Zeitraum (abgerechnet + übersprungen)
     }
 """
@@ -89,6 +90,7 @@ def lade_auslagen(
         "freigegeben": False,
         "auslagen": {},
         "nicht_freigegeben": [],
+        "offene_zeilen": {},
         "zeitraum_zeilen": 0,
     }
     if not pfad.is_file():
@@ -108,6 +110,7 @@ def lade_auslagen(
     bis = letzter_des_monats(zeitraum.jahr, zeitraum.letzter_monat)
 
     nicht_freigegeben: list[dict[str, Any]] = []
+    offene_zeilen: dict[str, int] = {}
     gruppe: dict[str, list[dict[str, Any]]] = {}
     freigegeben = False
     zeitraum_zeilen = 0
@@ -149,6 +152,7 @@ def lade_auslagen(
                     "belegnr": str(satz.get("belegnr", "")).strip(),
                 }
             )
+            offene_zeilen[kunde] = offene_zeilen.get(kunde, 0) + 1
             continue
         gruppe.setdefault(kunde, []).append(
             {
@@ -175,6 +179,7 @@ def lade_auslagen(
         "freigegeben": freigegeben,
         "auslagen": gruppe,
         "nicht_freigegeben": nicht_freigegeben,
+        "offene_zeilen": offene_zeilen,
         "zeitraum_zeilen": zeitraum_zeilen,
     }
 

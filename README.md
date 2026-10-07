@@ -135,6 +135,24 @@ freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (i
   **mindestens eine** Zeile des Zeitraums `yes`/`ja` hat – sonst ENTWURF.
 - Fehlt die Spalte komplett: keine Zeile freigegeben → ENTWURF + WARNUNG.
 
+## Kunden-Berücksichtigung je Zeitraum
+
+**Jeder Kunde, der im Abrechnungszeitraum eines der Gewerke genutzt hat,
+wird berücksichtigt** – egal welches:
+
+- **Arbeitsstunden** (iCal-Termine mit Kundenkürzel im Zeitraum)
+- **Services** (Blatt 'Services', Menge > 0 in einem Zeitraum-Monat)
+- **Auslagen** (Zeilen der zentralen Auslagen-ODS mit Datum im Zeitraum)
+
+Auch Kunden mit **nur einem** Gewerk (nur Stunden, nur Services oder nur
+Auslagen) bekommen eine eigene Rechnung. Sonderfall Auslagen: Die
+Rechnung entsteht erst, sobald mindestens eine Zeile des Kunden im
+Zeitraum `freigabe` = `yes`/`ja` hat. Hat ein Kunde im Zeitraum nur
+**offene** (nicht freigegebene) Auslagen und sonst nichts, erhält er
+noch **keine** Rechnung – er wird stattdessen ausdrücklich gemeldet:
+`Hinweis: <kunde> – N nicht freigegebene Auslagenzeile(n) … noch keine
+Rechnung, bis freigabe=yes/ja`. Kein Kunde verschwindet stillschweigend.
+
 ## Rechnungsaufbau (PDF)
 
 - **Erstseite**: Positionstabelle + Summenblock. Spalten:

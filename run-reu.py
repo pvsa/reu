@@ -128,6 +128,13 @@ def cmd_expenses(cfg: Config, zeitraum: Zeitraum) -> int:
         f"{erg['zeitraum_zeilen']} Zeile(n) im Zeitraum"
     )
     _warne_nicht_freigegeben(erg)
+    # Kunden mit nur offenen (nicht freigegebenen) Auslagen ausdrücklich
+    # nennen – sie dürfen nicht stillschweigend fehlen:
+    for k in sorted(erg.get("offene_zeilen", {})):
+        print(
+            f"Hinweis: {k} – {erg['offene_zeilen'][k]} nicht freigegebene "
+            f"Auslagenzeile(n) für {zeitraum.text} (noch nicht abgerechnet)."
+        )
     for k in sorted(erg["auslagen"]):
         kunde = kunden.get(k, None)
         name = kunde.name if kunde else "(unbekannt)"
@@ -290,6 +297,20 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
         erg = _erzeuge_rechnung(cfg, kunde, stunden, auslagen, services, zeitraum, state, dry_run, freigegeben)
         ergebnisse.append(erg)
         print(f"{'ENTWURF ' if erg['entwurf'] else 'FINALE  '}{k}: {erg['renr']}  Netto {euro(erg['summen']['netto'])}  Brutto {euro(erg['summen']['brutto'])}  → {erg['pdf']}")
+
+    # Jeder Kunde, der im Zeitraum ein Gewerk genutzt hat (Arbeitsstunden,
+    # Services, Auslagen), muss berücksichtigt sein. Kunden mit NUR offenen
+    # (nicht freigegebenen) Auslagen bekommen noch keine Rechnung – sie
+    # dürfen aber nicht stillschweigend fehlen:
+    abgerechnet = {e["kunde"] for e in ergebnisse}
+    for k in sorted(auslagen_erg.get("offene_zeilen", {})):
+        if k in abgerechnet:
+            continue
+        print(
+            f"Hinweis: {k} – {auslagen_erg['offene_zeilen'][k]} nicht freigegebene "
+            f"Auslagenzeile(n) für {zeitraum.text}: noch keine Rechnung, "
+            "bis in der Auslagen-ODS freigabe=yes/ja gesetzt ist."
+        )
 
     if dry_run:
         print("\nDRY RUN — keine E-Mails versendet, keine Re-Nr vergeben, kein State geschrieben.")

@@ -1,14 +1,17 @@
 """Stufe 3: Rechnungs-PDF mit reportlab erzeugen.
 
 Pro Kunde und Zeitraum eine Rechnung mit:
-  1. Sammelposition Stunden (Leistungszeitraum, Menge HUR, Stundensatz)
-  2. Einzelpositionen Auslagen (je ODS-Zeile)
-  3. Summenblock (Netto, USt 19%, Brutto)
-  4. Fuß mit USt-IdNr. (soweit vorhanden), IBAN/BIC, Zahlungsziel,
+  1. Sammelposition Stunden (Leistungszeitraum, Menge HUR, Stundensatz,
+     Verweis auf Anlage Arbeitsstunden)
+  2. Service-Positionen (je Service und Monat, Menge Stück)
+  3. Sammelposition Auslagen (Verweis auf Anlage Auslagen)
+  4. Summenblock (Netto, USt 19%, Brutto)
+  5. Fuß mit USt-IdNr. (soweit vorhanden), IBAN/BIC, Zahlungsziel,
      Rechnungsnummer, Hinweis auf eingebettete E-Rechnung (nur bei Freigabe).
 
-Außerdem wird die Stundentabelle als Anlage-Seite beigelegt
-(Spalten: Datum, Startzeit, Beschreibung, Dauer).
+Außerdem werden zwei Anlage-Seiten beigelegt:
+  - Anlage 'Arbeitsstunden' (Spalten: Datum, Startzeit, Beschreibung, Dauer)
+  - Anlage 'Auslagen' (Spalten: Datum, Art, Bezeichnung, Beleg-Nr., Betrag)
 
 Erste Seite im Briefkopf-Stil: Logo oben links, Adressfeld darunter.
 """
@@ -118,7 +121,8 @@ def _positionen(
         pos_zeilen.append(
             [
                 str(pos_nr),
-                f"Beratungsleistung Leistungszeitraum {zeitraum.text}",
+                f"Beratungsleistung Leistungszeitraum {zeitraum.text} "
+                f"(siehe Anlage Arbeitsstunden)",
                 menge(stunden_total),
                 UNIT_STUNDE,
                 euro(kunde.stundensatz),
@@ -138,18 +142,16 @@ def _positionen(
             ]
         )
         pos_nr += 1
-    for i, a in enumerate(auslagen, start=pos_nr):
-        bez = f"{a['art']} {a['bezeichnung']}".strip()
-        if a["belegnr"]:
-            bez += f" (Beleg {a['belegnr']})"
+    if auslagen:
+        # Sammelposition – Details stehen in der Anlage 'Auslagen'
         pos_zeilen.append(
             [
-                str(i),
-                bez,
+                str(pos_nr),
+                "Auslagen (siehe Anlage Auslagen)",
                 "1,00",
                 UNIT_STUECK,
-                euro(a["betrag_netto"]),
-                euro(a["betrag_netto"]),
+                euro(netto_auslagen),
+                euro(netto_auslagen),
             ]
         )
 
@@ -220,6 +222,46 @@ def _stunden_anlage(stunden: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitr
                 ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
                 ("ALIGN", (1, 1), (1, -1), "CENTER"),
                 ("ALIGN", (3, 1), (3, -1), "RIGHT"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    story.append(t)
+    return story
+
+
+def _auslagen_anlage(auslagen: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitraum) -> list:
+    """Auslagentabelle als Anlage-Seite."""
+    styles = _styles()
+    story: list = []
+    story.append(Paragraph(f"Anlage: Auslagen {zeitraum.text}", styles["titel"]))
+    story.append(Paragraph(f"Kunde: {kunde.name} ({kunde.kunde})", styles["normal"]))
+    story.append(Spacer(1, 6 * mm))
+    data = [["Datum", "Art", "Bezeichnung", "Beleg-Nr.", "Betrag"]]
+    total = Decimal("0")
+    for a in auslagen:
+        data.append(
+            [
+                str(a["datum"]),
+                a["art"],
+                a["bezeichnung"],
+                a["belegnr"],
+                euro(a["betrag_netto"]),
+            ]
+        )
+        total += a["betrag_netto"]
+    data.append(["Summe", "", "", "", euro(total)])
+    t = Table(data, colWidths=[24 * mm, 22 * mm, 85 * mm, 20 * mm, 24 * mm])
+    t.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("GRID", (0, 0), (-1, -2), 0.25, colors.grey),
+                ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.black),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("ALIGN", (4, 1), (4, -1), "RIGHT"),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
             ]
@@ -355,6 +397,11 @@ def erzeuge_rechnung_pdf(
     if stunden:
         story.append(PageBreak())
         story.extend(_stunden_anlage(stunden, kunde, zeitraum))
+
+    # Anlage: Auslagen
+    if auslagen:
+        story.append(PageBreak())
+        story.extend(_auslagen_anlage(auslagen, kunde, zeitraum))
 
     ausgabe_pfad.parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(

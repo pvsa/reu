@@ -102,7 +102,8 @@ ZUGFeRD-XML (TaxRegistration VA) ausgewiesen.
 |-------|---------|----------------------|---|---|---|---|----|
 
 Die Spalten '1'–'12' sind die Monate des Jahres; der Zellwert ist die
-Anzahl der Serviceeinheiten in diesem Monat (leer = 0). Pro Service und
+Anzahl der Serviceeinheiten in diesem Monat (leer = 0). Spaltentitel sind
+groß-/kleinschreibungsagnostisch ('Kunde' wie 'kunde'). Pro Service und
 Monat mit Menge > 0 entsteht eine eigene Rechnungsposition auf der
 Rechnungs-Erstseite (und im ZUGFeRD-XML). Kunden mit nur Service-Einheiten
 (ohne Stunden/Auslagen) bekommen ebenfalls eine Rechnung.
@@ -124,11 +125,24 @@ freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (i
 **Freigabe zeilenweise** über die Spalte `freigabe` (Name konfigurierbar
 über [auslagen] freigabe_spalte, Default `freigabe`):
 
-- `yes` → Zeile wird abgerechnet (Groß-/Kleinschreibung egal).
-- leer/`no` → Zeile wird **übersprungen** (Ausgabe: WARNUNG je Zeile).
+- `yes` oder `ja` → Zeile wird abgerechnet (Groß-/Kleinschreibung egal).
+- leer/`no`/`nein` → Zeile wird **übersprungen** (Ausgabe: WARNUNG je Zeile).
 - Die Rechnung ist **finale** (echte Re-Nr, State, ZUGFeRD, Versand), sobald
-  **mindestens eine** Zeile des Zeitraums `yes` hat – sonst ENTWURF.
+  **mindestens eine** Zeile des Zeitraums `yes`/`ja` hat – sonst ENTWURF.
 - Fehlt die Spalte komplett: keine Zeile freigegeben → ENTWURF + WARNUNG.
+
+## Rechnungsaufbau (PDF)
+
+- **Erstseite**: Positionstabelle + Summenblock. Die Positionstexte
+  verweisen auf die Anlagen: Stunden-Sammelposition mit
+  „(siehe Anlage Arbeitsstunden)", Services je Service und Monat,
+  Auslagen als **eine** Sammelposition „Auslagen (siehe Anlage Auslagen)".
+- **Anlage: Arbeitsstunden** – Datum | Start | Beschreibung | Dauer (h)
+  (nur wenn Stunden vorhanden)
+- **Anlage: Auslagen** – Datum | Art | Bezeichnung | Beleg-Nr. | Betrag
+  (nur wenn Auslagen freigegeben vorhanden)
+- Das ZUGFeRD-XML enthält dieselben Positionen (Stunden, Services je
+  Monat, eine Auslagen-Sammelposition) – konsistent zur PDF.
 
 ## CLI
 

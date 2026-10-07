@@ -156,6 +156,10 @@ def lade_blatt(datei: str | Path, blatt: str) -> list[list[Any]]:
         raise OdsError(f"ODS-Datei nicht gefunden: {pfad}")
     workbook = _lese_ods(pfad)
     if blatt not in workbook:
+        # Groß-/Kleinschreibung des Blattnamens tolerieren ('services' == 'Services')
+        treffer = [n for n in workbook if n.lower() == blatt.lower()]
+        if treffer:
+            return workbook[treffer[0]]
         verfuegbar = ", ".join(sorted(workbook.keys())) or "(keine)"
         raise OdsError(f"Blatt '{blatt}' fehlt in {pfad}. Vorhanden: {verfuegbar}")
     return workbook[blatt]

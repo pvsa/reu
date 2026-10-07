@@ -6,6 +6,7 @@ Format des Blatts (eine Zeile je Kunde und Service):
 
 Die Spalten '1'–'12' stehen für die Monate des Jahres; der Zellwert ist
 die Anzahl der Serviceeinheiten in diesem Monat (leer = 0).
+Spaltentitel sind groß-/kleinschreibungsagnostisch ('Kunde' wie 'kunde').
 
 Pro Service und Monat mit Menge > 0 entsteht eine eigene
 Rechnungsposition (siehe positionen_fuer_zeitraum).
@@ -39,10 +40,13 @@ class Service:
 
 
 def _norm_satz(satz: dict[str, Any]) -> dict[str, Any]:
-    """Normalisiert Header-Schlüssel ('1.0'/'01' -> '1')."""
+    """Normalisiert Header-Schlüssel: 'Kunde'->'kunde', '1.0'/'01' -> '1'.
+
+    Groß-/Kleinschreibung der Spaltentitel ist egal.
+    """
     aus: dict[str, Any] = {}
     for schluessel, wert in satz.items():
-        k = schluessel.strip()
+        k = schluessel.strip().lower()
         if _FLOAT_HEADER.match(k):
             k = k[:-2]
         elif len(k) == 2 and k.isdigit() and k.startswith("0"):
@@ -68,8 +72,10 @@ def lade_services(
     """Liest das Blatt 'Services' und liefert {kunde: [Service, ...]}.
 
     Das Blatt ist OPTIONAL: Fehlt es in der ODS, gibt es keine Services
-    ({}) – das ist kein Fehler. Fehlt die ODS selbst oder ist eine
-    Service-Zeile unvollständig, wird ServicesError geworfen.
+    ({}) – das ist kein Fehler. Fehlt die ODS selbst, ist eine
+    Service-Zeile unvollständig oder werden die Spalten 'kunde'/'service'
+    nicht erkannt, wird ServicesError geworfen. Spaltentitel sind
+    groß-/kleinschreibungsagnostisch ('Kunde' wie 'kunde').
     """
     pfad = Path(datei)
     if not pfad.is_file():
@@ -87,6 +93,16 @@ def lade_services(
         kunde = str(satz.get("kunde", "")).strip()
         name = str(satz.get("service", "")).strip()
         if not kunde and not name:
+            if any(
+                v is not None and str(v).strip() for v in rohsatz.values()
+            ):
+                # Zeile hat Werte, aber kunde/service sind leer oder die
+                # Spalten werden nicht erkannt – nicht stillschweigend skippen!
+                raise ServicesError(
+                    "Services-Zeile enthält Werte, aber 'kunde'/'service' sind "
+                    f"leer oder die Spaltennamen werden nicht erkannt: {rohsatz!r} "
+                    "(erwartet: kunde, service, Kosten pro Stück [€], 1–12)"
+                )
             continue  # komplett leere Zeile
         if not kunde or not name:
             raise ServicesError(

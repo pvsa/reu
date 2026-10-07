@@ -154,14 +154,17 @@ def erzeuge_xml(
     settlement.payment_means.add(pm)
 
     # Positionen: Stunden (falls > 0), dann Services (je Service+Monat),
-    # dann Auslagen – fortlaufend nummeriert, konsistent zur PDF.
+    # dann EINE Sammelposition Auslagen – konsistent zur PDF (Details in Anlage).
     pos_nr = 1
     stunden_total = summen["stunden_total"]
     if stunden_total > 0:
         _add_lineitem(
             document,
             line_id=str(pos_nr),
-            name=f"Beratungsleistung Leistungszeitraum {zeitraum.text}",
+            name=(
+                f"Beratungsleistung Leistungszeitraum {zeitraum.text} "
+                f"(siehe Anlage Arbeitsstunden)"
+            ),
             description=f"{stunden_total} Stunden zu je {kunde.stundensatz} EUR",
             menge=stunden_total,
             unit=UNIT_STUNDE,
@@ -179,18 +182,15 @@ def erzeuge_xml(
             einzelpreis=s["einzelpreis"],
         )
         pos_nr += 1
-    for i, a in enumerate(auslagen, start=pos_nr):
-        bez = f"{a['art']} {a['bezeichnung']}".strip()
-        if a["belegnr"]:
-            bez += f" (Beleg {a['belegnr']})"
+    if auslagen:
         _add_lineitem(
             document,
-            line_id=str(i),
-            name=bez,
-            description=f"Auslage, Beleg {a['belegnr']}" if a["belegnr"] else "Auslage",
+            line_id=str(pos_nr),
+            name="Auslagen (siehe Anlage Auslagen)",
+            description="Auslagen gemäß Anlage Auslagen",
             menge=Decimal("1"),
             unit=UNIT_STUECK,
-            einzelpreis=a["betrag_netto"],
+            einzelpreis=summen["netto_auslagen"],
         )
 
     mon = settlement.monetary_summation

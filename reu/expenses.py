@@ -10,11 +10,11 @@ Monatsdatei des Zeitraums, wird kein Fehler geworfen, sondern
 "ohne_dateien": True geliefert – das CLI fragt dann zu Beginn den Nutzer um
 Bestätigung, dass ohne Auslagen abgerechnet wird.
 
-Freigabe zeilenweise: Nur Zeilen mit freigabe='yes' werden abgerechnet,
+Freigabe zeilenweise: Nur Zeilen mit freigabe='yes'/'ja' werden abgerechnet,
 nicht freigegebene Zeilen werden übersprungen und in
 "nicht_freigegeben" zurückgemeldet. Die Rechnung gilt als freigegeben
 (finale Re-Nr, ZUGFeRD, Versand), sobald MINDESTENS EINE Zeile des
-Zeitraums freigegeben ist.
+Zeitraums freigegeben ist ('yes' oder 'ja').
 
 Rückgabe:
     {
@@ -52,8 +52,9 @@ def _lies_monatsdatei(
 
     Liefert (freigegebene_saetze, hat_freigabe_spalte, nicht_freigegebene_saetze).
     Eine Zeile gilt als freigegeben, wenn die Spalte conf.freigabe_spalte
-    (Default 'freigabe') den Wert 'yes' enthält (Groß-/Kleinschreibung egal).
-    Fehlt die Spalte komplett, ist keine Zeile freigegeben.
+    (Default 'freigabe') den Wert 'yes' ODER 'ja' enthält
+    (Groß-/Kleinschreibung egal). Fehlt die Spalte komplett, ist keine
+    Zeile freigegeben.
     """
     saetze = blatt_als_dicts(pfad, conf.blatt)
     pflichtspalten = conf.pflichtspalten or PFLICHTSPALTEN_DEFAULT
@@ -71,7 +72,7 @@ def _lies_monatsdatei(
     offen: list[dict[str, Any]] = []
     for satz in saetze:
         wert = str(satz.get(spalte, "")).strip().lower()
-        (freigegeben if wert == "yes" else offen).append(satz)
+        (freigegeben if wert in {"yes", "ja"} else offen).append(satz)
     return freigegeben, True, offen
 
 

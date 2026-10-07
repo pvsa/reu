@@ -21,6 +21,7 @@ import datetime as _dt
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -43,8 +44,6 @@ from .util import (
     Zeitraum,
     UST_PROZENT,
     UST_SATZ,
-    UNIT_STUNDE,
-    UNIT_STUECK,
 )
 
 
@@ -114,7 +113,7 @@ def _positionen(
     brutto = netto + ust
 
     pos_zeilen: list[list[Any]] = [
-        ["Pos.", "Bezeichnung", "Menge", "Einh.", "Einzelpreis", "Netto"],
+        ["Pos.", "Bezeichnung", "Menge", "Einzelpreis", "Netto"],
     ]
     pos_nr = 1
     if stunden_total > 0:
@@ -124,7 +123,6 @@ def _positionen(
                 f"Beratungsleistung Leistungszeitraum {zeitraum.text} "
                 f"(siehe Anlage Arbeitsstunden)",
                 menge(stunden_total),
-                UNIT_STUNDE,
                 euro(kunde.stundensatz),
                 euro(netto_stunden),
             ]
@@ -136,7 +134,6 @@ def _positionen(
                 str(pos_nr),
                 f"{s['service']} – {s['monat']:02d}/{s['jahr']}",
                 menge(s["menge"]),
-                UNIT_STUECK,
                 euro(s["einzelpreis"]),
                 euro((s["menge"] * s["einzelpreis"]).quantize(Decimal("0.01"))),
             ]
@@ -149,7 +146,6 @@ def _positionen(
                 str(pos_nr),
                 "Auslagen (siehe Anlage Auslagen)",
                 "1,00",
-                UNIT_STUECK,
                 euro(netto_auslagen),
                 euro(netto_auslagen),
             ]
@@ -349,8 +345,15 @@ def erzeuge_rechnung_pdf(
         )
     story.append(Spacer(1, 4 * mm))
 
-    # Positionstabelle
-    t = Table(pos_zeilen, colWidths=[12 * mm, 78 * mm, 18 * mm, 14 * mm, 24 * mm, 26 * mm])
+    # Positionstabelle – Bezeichnung als Paragraph, damit lange Texte
+    # automatisch in der Spalte umbrechen (mehrzeilig).
+    tab_daten = [pos_zeilen[0]] + [
+        [z[0]]
+        + [Paragraph(escape(str(z[1])).replace("\n", "<br/>"), styles["normal"])]
+        + list(z[2:])
+        for z in pos_zeilen[1:]
+    ]
+    t = Table(tab_daten, colWidths=[12 * mm, 92 * mm, 18 * mm, 24 * mm, 26 * mm])
     t.setStyle(
         TableStyle(
             [

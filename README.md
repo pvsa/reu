@@ -137,7 +137,10 @@ freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (i
 
 ## Rechnungsaufbau (PDF)
 
-- **Erstseite**: Positionstabelle + Summenblock. Die Positionstexte
+- **Erstseite**: Positionstabelle + Summenblock. Spalten:
+  `Pos. | Bezeichnung | Menge | Einzelpreis | Netto` (ohne Einheiten-Spalte;
+  Einheiten stehen nur im ZUGFeRD-XML). Lange Bezeichnungen brechen
+  automatisch mehrzeilig in der Spalte um. Die Positionstexte
   verweisen auf die Anlagen: Stunden-Sammelposition mit
   „(siehe Anlage Arbeitsstunden)", Services je Service und Monat,
   Auslagen als **eine** Sammelposition „Auslagen (siehe Anlage Auslagen)".

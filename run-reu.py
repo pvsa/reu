@@ -67,14 +67,14 @@ def _drucke_tabelle(zeilen: list[list[str]], kopf: list[str]) -> None:
 def _bestaetige_keine_auslagen(cfg: Config, zeitraum: Zeitraum) -> bool:
     """Fragt den Nutzer, ob ohne Auslagen-Datei weitergearbeitet werden darf.
 
+    Wird nur aufgerufen, wenn die zentrale <user>-auslagen.ods FEHLT.
     Default ist WEITER: Enter, 'j'/'ja' (auch 'y'/'yes') fahren fort;
     nur 'n'/'nein'/'no' bricht ab. Bei nicht-interaktiver Eingabe (EOF)
     wird ebenfalls fortgefahren.
     """
-    erste = cfg.auslagen.datei.format(year=zeitraum.jahr, month=zeitraum.erster_monat)
     frage = (
-        f"Keine Auslagen-ODS für {zeitraum.text} gefunden "
-        f"(z.B. erwartet: {erste}).\n"
+        f"Keine Auslagen-ODS gefunden (erwartet: {cfg.auslagen.datei}).\n"
+        f"Für {zeitraum.text} werden dann keine Auslagen abgerechnet.\n"
         "Ohne Auslagen fortfahren? [J/n]: "
     )
     try:
@@ -110,19 +110,23 @@ def cmd_hours(cfg: Config, zeitraum: Zeitraum) -> int:
 
 
 def cmd_expenses(cfg: Config, zeitraum: Zeitraum) -> int:
-    # Früh fragen, Default: ohne Auslagen weiter
-    if not expenses_mod.auslagen_dateien_vorhanden(cfg.auslagen, zeitraum):
+    # Früh fragen, wenn die zentrale Auslagen-ODS fehlt – Default: weiter
+    if not expenses_mod.auslagen_datei_vorhanden(cfg.auslagen):
         if not _bestaetige_keine_auslagen(cfg, zeitraum):
             print("Abbruch durch Nutzer – Auslagen-Prüfung ohne Bestätigung beendet.")
             return 1
-        print(f"Keine Auslagen für {zeitraum.text} (bestätigt) – nichts zu prüfen.")
+        print("Keine Auslagen-ODS (bestätigt) – nichts zu prüfen.")
         return 0
     kunden = _lade_kunden(cfg)
     erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
-    if erg.get("ohne_dateien"):
-        print(f"Keine Auslagen für {zeitraum.text} (bestätigt).")
+    if erg["zeitraum_zeilen"] == 0:
+        print(f"Keine Auslagenzeilen für {zeitraum.text} in {cfg.auslagen.datei}.")
         return 0
-    print(f"Auslagen {zeitraum.text} – Freigabe: {'JA' if erg['freigegeben'] else 'NEIN (Entwurf)'}")
+    print(
+        f"Auslagen {zeitraum.text} – Freigabe: "
+        f"{'JA' if erg['freigegeben'] else 'NEIN (Entwurf)'} – "
+        f"{erg['zeitraum_zeilen']} Zeile(n) im Zeitraum"
+    )
     _warne_nicht_freigegeben(erg)
     for k in sorted(erg["auslagen"]):
         kunde = kunden.get(k, None)
@@ -217,17 +221,17 @@ def _warne_nicht_freigegeben(erg: dict) -> None:
     """Gibt nicht freigegebene (übersprungene) Auslagenzeilen als Warnung aus."""
     for e in erg.get("nicht_freigegeben", []):
         if "hinweis" in e:
-            print(f"WARNUNG: {e['datei']}: {e['hinweis']}")
+            print(f"WARNUNG: {e['hinweis']}")
         else:
             bez = f"{e['kunde']} {e['bezeichnung']}".strip()
             if e["belegnr"]:
                 bez += f" (Beleg {e['belegnr']})"
-            print(f"WARNUNG: Auslage nicht freigegeben – übersprungen: {bez} – {e['datei']}")
+            print(f"WARNUNG: Auslage nicht freigegeben – übersprungen: {bez}")
 
 
 def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: str | None) -> int:
-    # Früh fragen, bevor geladen und gerechnet wird – Default: ohne Auslagen weiter
-    if not expenses_mod.auslagen_dateien_vorhanden(cfg.auslagen, zeitraum):
+    # Früh fragen, wenn die zentrale Auslagen-ODs FEHLT – Default: weiter
+    if not expenses_mod.auslagen_datei_vorhanden(cfg.auslagen):
         if not _bestaetige_keine_auslagen(cfg, zeitraum):
             print("Abbruch durch Nutzer – keine Rechnungen erzeugt.")
             return 1
@@ -242,8 +246,20 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
     }
     stunden_alle = ical_mod.lade_stunden(cfg.ical, zeitraum)
     auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
-    if auslagen_erg.get("ohne_dateien"):
-        print(f"Hinweis: keine Auslagen für {zeitraum.text} – Rechnung nur mit Stunden/Services.")
+    # Genereller Hinweis auf die Auslagenlage
+    if not auslagen_erg["datei_vorhanden"]:
+        print(
+            f"Hinweis: keine Auslagen-ODS ({cfg.auslagen.datei}) – "
+            "Rechnung nur mit Stunden/Services."
+        )
+    elif auslagen_erg["zeitraum_zeilen"] == 0:
+        print(f"Hinweis: keine Auslagenzeilen für {zeitraum.text} in {cfg.auslagen.datei}.")
+    else:
+        abgerechnet = sum(len(v) for v in auslagen_erg["auslagen"].values())
+        print(
+            f"Auslagen: {auslagen_erg['zeitraum_zeilen']} Zeile(n) für {zeitraum.text}, "
+            f"{abgerechnet} abgerechnet."
+        )
     _warne_nicht_freigegeben(auslagen_erg)
     # freigegeben = Spalte 'freigabe' = 'yes' in mindestens EINER Zeile des Zeitraums.
     # Im Dry-Run wird die ZUGFeRD-PDF trotzdem erzeugt (zum Prüfen);

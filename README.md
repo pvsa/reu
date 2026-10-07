@@ -31,11 +31,12 @@ Bei Mehrmonats-Zeiträumen gilt:
 
 - **iCal**: alle Termine vom ersten Tag des ersten bis zum letzten Tag des
   letzten Monats (Zeitzonen werden normalisiert).
-- **Auslagen**: die Monats-ODSen werden je Monat geladen ({year}/{month}-
-  Template) und zusammengefasst. Fehlende Monatsdateien sind erlaubt. Existiert **keine**
-  Monatsdatei des Zeitraums, fragt das CLI **zu Beginn** um Bestätigung, dass
-  ohne Auslagen abgerechnet wird – **Default ist Fortfahren** (Enter oder `j`);
-  nur `n`/`nein` bricht ab.
+- **Auslagen**: **eine zentrale Datei** `<user>-auslagen.ods` – die Spalte
+  `datum` entscheidet, welche Zeilen zum Zeitraum gehören (Zeilen anderer
+  Monate/Jahre bleiben unberührt). Existiert die Datei **nicht**, fragt das
+  CLI **zu Beginn** um Bestätigung – **Default ist Fortfahren** (Enter oder
+  `j`); nur `n`/`nein` bricht ab. Ansonsten weist das CLI generell auf die
+  Auslagenlage hin (Zeilen im Zeitraum, abgerechnet, übersprungen).
   Freigabe zeilenweise über die Spalte `freigabe` (siehe unten).
 - **Rechnungsdatum** = letzter Tag des letzten Monats des Zeitraums,
   Zahlungsziel ab diesem Datum.
@@ -108,11 +109,14 @@ Monat mit Menge > 0 entsteht eine eigene Rechnungsposition auf der
 Rechnungs-Erstseite (und im ZUGFeRD-XML). Kunden mit nur Service-Einheiten
 (ohne Stunden/Auslagen) bekommen ebenfalls eine Rechnung.
 
-## Auslagen-ODS conf/auslagen_{year}-{month:02d}.ods
+## Auslagen-ODS conf/<user>-auslagen.ods
 
-Pfad-Template aus [auslagen] datei mit {year}/{month} – **eine Datei je
-Monat**. Bei Mehrmonats-Zeiträumen werden alle vorhandenen Monatsdateien
-zusammengefasst.
+**Eine zentrale Datei je User** ([auslagen] datei, z.B.
+`conf/philipp-auslagen.ods`), wie die `<user>-kunden.ods`. Die Spalte
+`datum` entscheidet über die Zuordnung: Nur Zeilen, deren Datum im
+Abrechnungszeitraum liegt, werden berücksichtigt – alle Zeilen bleiben in
+der Datei liegen und werden fortlaufend ergänzt. Datum als ODS-Datumzelle,
+`TT.MM.JJJJ` oder `JJJJ-MM-TT`.
 
 **Blatt 'Auslagen'** (eine Zeile pro Beleg):
 

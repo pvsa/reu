@@ -151,9 +151,14 @@ def lade_config(user: str, *, basis: Path | None = None) -> Config:
     pflichtspalten = [s.strip() for s in pflichtspalten_roh.split(",") if s.strip()] or [
         "datum", "kunde", "art", "bezeichnung", "betrag_netto", "belegnr"
     ]
+    auslagen_datei_roh = _get(parser, "auslagen", "datei")
     auslagen = AuslagenConf(
         quelle=_get(parser, "auslagen", "quelle", fallback="ods"),
-        datei=_get(parser, "auslagen", "datei"),
+        datei=str(
+            (basis / auslagen_datei_roh)
+            if not os.path.isabs(auslagen_datei_roh)
+            else auslagen_datei_roh
+        ),
         blatt=_get(parser, "auslagen", "blatt", fallback="Auslagen"),
         freigabe_spalte=_get(parser, "auslagen", "freigabe_spalte", fallback="freigabe"),
         pflichtspalten=pflichtspalten,

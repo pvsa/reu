@@ -4,9 +4,14 @@ Format des Blatts (eine Zeile je Kunde und Service):
 
     kunde | service | Kosten pro Stück [€] | 1 | 2 | 3 | … | 12
 
-Die Spalten '1'–'12' stehen für die Monate des Jahres; der Zellwert ist
-die Anzahl der Serviceeinheiten in diesem Monat (leer = 0).
+Die Spalten '1'–'12' stehen für die Monate des Jahres. Zellwert je Monat:
+- Zahl (z.B. '2' oder 2) = Anzahl der Serviceeinheiten in diesem Monat
+- Markierung ('x', 'ja', 'yes', 'j', 'y', 'ok', 'wahr', 'true', '✓' oder
+  Wahrheitszelle) = 1 Einheit (Service in diesem Monat erbracht/markiert)
+- leer = 0
 Spaltentitel sind groß-/kleinschreibungsagnostisch ('Kunde' wie 'kunde').
+Andere, nicht leere Zellwerte sind ein FEHLER (kein stillschweigendes
+Übergehen – sonst fehlt das Gewerk unbemerkt auf der Rechnung).
 
 Pro Service und Monat mit Menge > 0 entsteht eine eigene
 Rechnungsposition (siehe positionen_fuer_zeitraum).
@@ -15,7 +20,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +66,64 @@ def _kosten_spalte(satz: dict[str, Any]) -> str | None:
         if schluessel.strip().lower().startswith("kosten"):
             return schluessel
     return None
+
+
+# Zellwerte, die als Markierung gelten (je 1 Serviceeinheit im Monat);
+# Groß-/Kleinschreibung egal.
+_MARKIERUNGEN = {"x", "ja", "yes", "j", "y", "ok", "wahr", "true", "✓", "✔"}
+
+
+def _zahl_aus_text(text: str) -> Decimal | None:
+    """Parst eine Zahl in DE- oder EN-Schreibweise; None wenn keine Zahl.
+
+    (dezimal() liefert bei unparsebarem Text Decimal('0') und kann
+    'keine Zahl' daher nicht von einer echten 0 unterscheiden.)
+    """
+    t = text
+    if "," in t and "." in t:
+        if t.rfind(",") > t.rfind("."):
+            t = t.replace(".", "").replace(",", ".")
+        else:
+            t = t.replace(",", "")
+    elif "," in t:
+        t = t.replace(",", ".")
+    try:
+        return Decimal(t)
+    except InvalidOperation:
+        return None
+
+
+def _menge_aus_zelle(wert: object) -> Decimal:
+    """Menge einer Monatszelle: Zahl = Anzahl, Markierung = 1, leer = 0.
+
+    Nicht leere, aber weder als Zahl noch als Markierung lesbare Werte
+    werfen ServicesError – ein Gewerk darf nie stillschweigend als
+    Menge 0 von der Rechnung verschwinden.
+    """
+    if wert is None:
+        return Decimal("0")
+    if isinstance(wert, bool):
+        return Decimal("1") if wert else Decimal("0")
+    if isinstance(wert, (int, float, Decimal)):
+        zahl = dezimal(wert)
+        if zahl < 0:
+            raise ServicesError(
+                f"Negative Anzahl in einer Monats-Spalte des Services-Blatts: {wert!r}"
+            )
+        return zahl
+    text = str(wert).strip()
+    if not text:
+        return Decimal("0")
+    if text.lower() in _MARKIERUNGEN:
+        return Decimal("1")
+    zahl = _zahl_aus_text(text)
+    if zahl is not None and zahl >= 0:
+        return zahl
+    raise ServicesError(
+        f"Ungültiger Wert {wert!r} in einer Monats-Spalte des Services-Blatts "
+        "(erlaubt: Anzahl als Zahl, Markierung wie 'x'/'ja'/'✓' = 1 Einheit, "
+        "leer = 0)"
+    )
 
 
 def lade_services(
@@ -124,9 +187,14 @@ def lade_services(
                 f"Kosten pro Stück für Service '{name}' (Kunde {kunde}) "
                 f"fehlt oder ist <= 0: {satz.get(kosten_spalte)!r}"
             )
+        if not any(str(m) in satz for m in range(1, 13)):
+            raise ServicesError(
+                "Monats-Spalten '1'-'12' fehlen im Services-Blatt für "
+                f"Service '{name}' (Kunde {kunde}) – Zeile: {rohsatz!r}"
+            )
         menge: dict[int, Decimal] = {}
         for monat in range(1, 13):
-            menge[monat] = dezimal(satz.get(str(monat)))
+            menge[monat] = _menge_aus_zelle(satz.get(str(monat)))
         services.setdefault(kunde, []).append(
             Service(kunde=kunde, name=name, kosten_pro_stueck=kosten, menge=menge)
         )

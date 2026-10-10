@@ -257,7 +257,30 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
         for k, svc in services_alle.items()
         if services_mod.positionen_fuer_zeitraum(svc, zeitraum)
     }
+    # Gewerke dürfen nie stillschweigend fehlen: Wenn keine Service-Positionen
+    # oder keine Stunden im Zeitraum vorliegen, ausdrücklich melden (Grund
+    # nennen – Services/Stunden sind zeitraum-gebunden, Auslagen nicht).
+    if not services_pos:
+        if not services_alle:
+            print(
+                f"Hinweis: keine Service-Definitionen (Blatt 'Services' fehlt "
+                f"oder ist leer in {cfg.kunden.datei}) – Rechnung ohne "
+                f"Service-Positionen."
+            )
+        else:
+            print(
+                f"Hinweis: keine markierten Service-Monate im Zeitraum "
+                f"{zeitraum.text} – Services anderer Monate sind "
+                f"zeitraum-gebunden (im Gegensatz zu Auslagen)."
+            )
     stunden_alle = ical_mod.lade_stunden(cfg.ical, zeitraum)
+    if not stunden_alle:
+        print(
+            f"Hinweis: keine Termine mit Kundenkürzel ('XXX: …' in SUMMARY "
+            f"oder CATEGORIES) im Zeitraum {zeitraum.text} – keine "
+            f"Arbeitsstunden-Positionen (Arbeitsstunden folgen ihrem "
+            f"Termin-Datum)."
+        )
     auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, set(kunden))
     # Genereller Hinweis auf die Auslagenlage
     if not auslagen_erg["datei_vorhanden"]:

@@ -105,12 +105,23 @@ ZUGFeRD-XML (TaxRegistration VA) ausgewiesen.
 | kunde | service | Kosten pro Stück [€] | 1 | 2 | 3 | … | 12 |
 |-------|---------|----------------------|---|---|---|---|----|
 
-Die Spalten '1'–'12' sind die Monate des Jahres; der Zellwert ist die
-Anzahl der Serviceeinheiten in diesem Monat (leer = 0). Spaltentitel sind
-groß-/kleinschreibungsagnostisch ('Kunde' wie 'kunde'). Pro Service und
-Monat mit Menge > 0 entsteht eine eigene Rechnungsposition auf der
-Rechnungs-Erstseite (und im ZUGFeRD-XML). Kunden mit nur Service-Einheiten
-(ohne Stunden/Auslagen) bekommen ebenfalls eine Rechnung.
+Die Spalten '1'–'12' sind die Monate des Jahres. Zellwert je Monat:
+
+- **Zahl** (z. B. `2`) = Anzahl der Serviceeinheiten in diesem Monat
+- **Markierung** (`x`, `ja`, `yes`, `j`, `y`, `ok`, `wahr`, `true`, `✓`
+  oder Wahrheitszelle) = **1 Einheit** – der Service gilt für diesen
+  markierten Monat
+- **leer** = 0 (Monat nicht abgerechnet)
+- Andere Werte sind ein **FEHLER** – das Gewerk darf nicht stillschweigend
+  als Menge 0 von der Rechnung verschwinden.
+
+Spaltentitel sind groß-/kleinschreibungsagnostisch ('Kunde' wie 'kunde',
+numerische Titel wie '7.0' werden als Monat 7 erkannt). Pro Service und
+Monat mit Menge > 0 (oder Markierung) entsteht eine eigene
+Rechnungsposition auf der Rechnungs-Erstseite (und im ZUGFeRD-XML) –
+**jeder markierte Monat innerhalb des Zeitraums im Aufruf**. Kunden mit
+nur Service-Einheiten (ohne Stunden/Auslagen) bekommen ebenfalls eine
+Rechnung.
 
 ## Auslagen-ODS conf/<user>-auslagen.ods
 
@@ -167,6 +178,14 @@ egal welches:
 - **Arbeitsstunden** (iCal-Termine mit Kundenkürzel im Zeitraum)
 - **Services** (Blatt 'Services', Menge > 0 in einem Zeitraum-Monat)
 - **Auslagen** (freigegebene Zeilen der zentralen Auslagen-ODS – datum-unabhängig)
+
+**Zeitraum-Bezug der Gewerke (im Gegensatz zu Auslagen):** Services
+werden für jeden markierten Monat **innerhalb des Zeitraums im Aufruf**
+abgerechnet, Arbeitsstunden folgen ihrem **Termin-Datum** (Datum liegt im
+Zeitraum). Liegen im Aufruf-Zeitraum keine Service-Monate und/oder keine
+Termine mit Kundenkürzel vor, meldet das CLI das ausdrücklich als Hinweis
+(„keine markierten Service-Monate im Zeitraum …“, „keine Termine mit
+Kundenkürzel …“) – ein Gewerk fehlt nie stillschweigend auf der Rechnung.
 
 Auch Kunden mit **nur einem** Gewerk (nur Stunden, nur Services oder nur
 Auslagen) bekommen eine eigene Rechnung. Sonderfall Auslagen: Die

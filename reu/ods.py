@@ -11,10 +11,11 @@ wobei jede Zeile eine Liste von Zellwerten ist
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import xml.etree.ElementTree as Et
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 _TABLE_NS = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
 _OFFICE_NS = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
@@ -218,3 +219,145 @@ def zelle(datei: str | Path, blatt: str, zelle_ref: str) -> Any:
     if spalte >= len(zeile):
         return None
     return zeile[spalte]
+
+
+# ---------------------------------------------------------------- Schreiben
+
+# Namensräume, die beim Zurückschreiben mit bekannten Präfixen erhalten
+# bleiben sollen (unbekannte erhält ns0:-Präfixe – ebenfalls gültiges XML).
+_XMLNS = (
+    ("office", _OFFICE_NS),
+    ("table", _TABLE_NS),
+    ("text", _TEXT_NS),
+    ("xlink", "http://www.w3.org/1999/xlink"),
+    ("dc", "http://purl.org/dc/elements/1.1/"),
+    ("meta", "urn:oasis:names:tc:opendocument:xmlns:meta:1.0"),
+    ("fo", "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"),
+    ("svg", "http://www.w3.org/2000/svg"),
+    ("of", "urn:oasis:names:tc:opendocument:xmlns:of:1.2"),
+    ("calcext", "urn:org:documentfoundation:names:experimental:calc:xmlns:calcext:1.0"),
+    ("loext", "urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0"),
+    ("grddl", "http://www.w3.org/2003/g/data-view#"),
+    ("css3t", "http://www.w3.org/TR/css3-text/"),
+)
+
+
+def _zeile_mit_zellen(zeile: Et.Element) -> tuple[list[Any], list[Et.Element]]:
+    """Wie _zeile_als_liste, zusätzlich mit dem Zell-Element je Position."""
+    werte: list[Any] = []
+    zellen: list[Et.Element] = []
+    for zelle in zeile:
+        if zelle.tag not in (_CELL, _COVERED_CELL):
+            continue
+        wert = _zellen_wert(zelle)
+        wiederholt = zelle.get(_COLS_REPEATED)
+        anzahl = int(wiederholt) if wiederholt else 1
+        if wert is None and anzahl > _MAX_LEER_WIEDERHOLUNG:
+            continue
+        werte.extend([wert] * anzahl)
+        zellen.extend([zelle] * anzahl)
+    return werte, zellen
+
+
+def _setze_textzelle(zelle: Et.Element, text: str) -> None:
+    """Macht aus der Zelle eine String-Zelle mit dem gegebenen Text.
+
+    Struktur-Attribute (number-columns-repeated, Stil) bleiben erhalten;
+    Typ-/Wert-Attribute und Zellinhalte werden ersetzt.
+    """
+    for attr in list(zelle.attrib):
+        if attr.startswith(f"{{{_OFFICE_NS}}}") and attr != _VALUE_TYPE:
+            del zelle.attrib[attr]
+    zelle.set(_VALUE_TYPE, "string")
+    for kind in list(zelle):
+        zelle.remove(kind)
+    absatz = Et.SubElement(zelle, _TEXT_P)
+    absatz.text = text
+
+
+def aendere_spalte(
+    datei: str | Path,
+    blatt: str,
+    spalte: str,
+    wert_funktion: Callable[[dict[str, Any]], str | None],
+) -> int:
+    """Setzt Zellenwerte einer Spalte über alle Datenzeilen des Blatts.
+
+    spalte: Headername der Zielspalte (Groß-/Kleinschreibung egal).
+    wert_funktion(satz) erhält je Datenzeile ein Dict der Werte mit
+    normalisierten (kleingeschriebenen) Headern als Schlüssel und liefert
+    den neuen Zelltext – oder None, wenn die Zeile unverändert bleibt.
+    Die erste nicht-leere Zeile gilt wie bei blatt_als_dicts als Kopfzeile
+    und wird nie geändert.
+
+    Gibt die Anzahl geänderter Zellen zurück (0 = nichts gespeichert).
+    Die Datei wird atomar gespeichert (temporäre Datei + replace), damit
+    nie ein halbes Archiv entstehen kann. Wirft OdsError bei Problemen.
+    """
+    pfad = Path(datei)
+    if not pfad.is_file():
+        raise OdsError(f"ODS-Datei nicht gefunden: {pfad}")
+    try:
+        with zipfile.ZipFile(pfad) as archiv:
+            content = archiv.read("content.xml")
+    except (zipfile.BadZipFile, KeyError) as exc:
+        raise OdsError(f"Keine gültige ODS-Datei: {pfad} ({exc})") from exc
+
+    try:
+        wurzel = Et.fromstring(content)
+    except Et.ParseError as exc:
+        raise OdsError(f"content.xml unlesbar in {pfad}: {exc}") from exc
+
+    tabelle = None
+    for t in wurzel.iter(_TABLE):
+        if (t.get(_NAME) or "").lower() == blatt.lower():
+            tabelle = t
+            break
+    if tabelle is None:
+        raise OdsError(f"Blatt '{blatt}' fehlt in {pfad}.")
+
+    ziel: int | None = None
+    header: list[str] = []
+    geaendert = 0
+    for zeile in tabelle.iter(_ROW):
+        werte, zellen = _zeile_mit_zellen(zeile)
+        if not any(w is not None for w in werte):
+            continue
+        if ziel is None:
+            # erste nicht-leere Zeile = Kopfzeile: Zielspalte bestimmen
+            header = [str(w).strip().lower() if w is not None else "" for w in werte]
+            ziel = next((i for i, h in enumerate(header) if h == spalte.strip().lower()), None)
+            if ziel is None:
+                vorh = ", ".join(h for h in header if h) or "(keine)"
+                raise OdsError(
+                    f"Spalte '{spalte}' fehlt in {pfad}!{blatt}. Vorhanden: {vorh}"
+                )
+            continue
+        if ziel >= len(werte) or ziel >= len(zellen):
+            continue  # Zeile endet vor der Zielspalte
+        satz = {header[i]: werte[i] for i in range(len(header)) if header[i]}
+        neu = wert_funktion(satz)
+        if neu is None:
+            continue
+        _setze_textzelle(zellen[ziel], str(neu))
+        geaendert += 1
+
+    if geaendert == 0:
+        return 0
+
+    for praefix, uri in _XMLNS:
+        Et.register_namespace(praefix, uri)
+    neuer_content = Et.tostring(wurzel, encoding="UTF-8", xml_declaration=True)
+    tmp = pfad.with_name(pfad.name + ".tmp")
+    try:
+        with zipfile.ZipFile(pfad) as alt, zipfile.ZipFile(tmp, "w") as neu:
+            for info in alt.infolist():
+                if info.filename == "content.xml":
+                    continue
+                neu.writestr(info, alt.read(info.filename))
+            neu.writestr("content.xml", neuer_content)
+        os.replace(tmp, pfad)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        raise OdsError(f"ODS-Datei konnte nicht gespeichert werden: {pfad} ({exc})") from exc
+    return geaendert

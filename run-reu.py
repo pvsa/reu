@@ -135,6 +135,12 @@ def cmd_expenses(cfg: Config, zeitraum: Zeitraum) -> int:
             f"Hinweis: {k} – {erg['offene_zeilen'][k]} nicht freigegebene "
             f"Auslagenzeile(n) für {zeitraum.text} (noch nicht abgerechnet)."
         )
+    # bereits abgerechnete Zeilen (Re-Nr eingetragen) je Beleg melden:
+    for e in erg.get("erledigt", []):
+        print(
+            f"Erledigt: {e['kunde']} – {e['bezeichnung']} (Beleg {e['belegnr']}) "
+            f"bereits abgerechnet mit {e['vermerk']}"
+        )
     for k in sorted(erg["auslagen"]):
         kunde = kunden.get(k, None)
         name = kunde.name if kunde else "(unbekannt)"
@@ -263,10 +269,11 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
         print(f"Hinweis: keine Auslagenzeilen für {zeitraum.text} in {cfg.auslagen.datei}.")
     else:
         abgerechnet = sum(len(v) for v in auslagen_erg["auslagen"].values())
-        print(
-            f"Auslagen: {auslagen_erg['zeitraum_zeilen']} Zeile(n) für {zeitraum.text}, "
-            f"{abgerechnet} abgerechnet."
-        )
+        bereits = len(auslagen_erg.get("erledigt", []))
+        hinweis = f"Auslagen: {auslagen_erg['zeitraum_zeilen']} Zeile(n) für {zeitraum.text}, {abgerechnet} abgerechnet"
+        if bereits:
+            hinweis += f", {bereits} bereits abgerechnet (Re-Nr eingetragen)"
+        print(hinweis + ".")
     _warne_nicht_freigegeben(auslagen_erg)
     # freigegeben = Spalte 'freigabe' = 'yes' in mindestens EINER Zeile des Zeitraums.
     # Im Dry-Run wird die ZUGFeRD-PDF trotzdem erzeugt (zum Prüfen);
@@ -311,6 +318,33 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
             f"Auslagenzeile(n) für {zeitraum.text}: noch keine Rechnung, "
             "bis in der Auslagen-ODS freigabe=yes/ja gesetzt ist."
         )
+    # Bereits abgerechnete Auslagen (Re-Nr in der Freigabe-Spalte) je Kunde
+    # melden, wenn dafür in diesem Lauf keine neue Rechnung entstanden ist:
+    erledigt_je_kunde: dict[str, list[str]] = {}
+    for e in auslagen_erg.get("erledigt", []):
+        erledigt_je_kunde.setdefault(e["kunde"], []).append(e["vermerk"])
+    for k in sorted(erledigt_je_kunde):
+        if k in abgerechnet:
+            continue
+        vermerke = ", ".join(sorted(set(erledigt_je_kunde[k])))
+        print(
+            f"Hinweis: {k} – {len(erledigt_je_kunde[k])} Auslagenzeile(n) bereits "
+            f"abgerechnet (Re-Nr {vermerke}) – keine erneute Rechnung."
+        )
+
+    # Abgerechnete Auslagenzeilen in der ODS als erledigt markieren:
+    # Rechnungsnummer statt 'ja' in der Freigabe-Spalte – schützt vor
+    # doppelter Abrechnung bei Wiederholungsläufen. Nur finale Läufe
+    # (keine ENTWÜRFE, kein Dry-Run) schreiben in die Auslagen-ODS.
+    if not dry_run:
+        renr_je_kunde = {e["kunde"]: e["renr"] for e in ergebnisse if not e["entwurf"]}
+        if renr_je_kunde:
+            try:
+                n_markiert = expenses_mod.vermerke_rechnungsnummern(cfg.auslagen, zeitraum, renr_je_kunde)
+                if n_markiert:
+                    print(f"Auslagen-ODS: {n_markiert} Zeile(n) mit Rechnungsnummer als erledigt markiert.")
+            except expenses_mod.AuslagenError as exc:
+                print(f"FEHLER beim Markieren der Auslagen in {cfg.auslagen.datei}: {exc}")
 
     if dry_run:
         print("\nDRY RUN — keine E-Mails versendet, keine Re-Nr vergeben, kein State geschrieben.")

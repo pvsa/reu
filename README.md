@@ -137,6 +137,17 @@ freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (i
   **mindestens eine** Zeile des Zeitraums `yes`/`ja` hat – sonst ENTWURF.
 - Fehlt die Spalte komplett: keine Zeile freigegeben → ENTWURF + WARNUNG.
 
+**Erledigt-Vermerk (Schutz vor doppelter Abrechnung):** Nach einem finalen
+Lauf (`--invoice`/`--full`, ohne `--dry-run`) trägt REU die **Rechnungsnummer
+in die Freigabe-Spalte** der abgerechneten Zeilen ein (`ja` → `2026-001`).
+Diese Zeilen gelten bei künftigen Läufen als **bereits abgerechnet**:
+Sie werden nicht erneut abgerechnet und nicht als nicht freigegeben
+angemeckert (in der Zusammenfassung als „bereits abgerechnet" gezählt,
+`--expenses` listet sie mit Re-Nr). FINALE bleibt an eine aktive
+`yes`/`ja`-Freigabe gebunden. Das Eintragen erfolgt atomar – hat
+LibreOffice die Datei gerade geöffnet, schlägt es mit FEHLER-Hinweis fehl
+und der Lauf bleibt unberührt.
+
 ## Kunden-Berücksichtigung je Zeitraum
 
 **Jeder Kunde, der im Abrechnungszeitraum eines der Gewerke genutzt hat,

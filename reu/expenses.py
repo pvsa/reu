@@ -27,8 +27,16 @@ Rückgabe von lade_auslagen:
       "auslagen": {kunde: [ {datum, art, bezeichnung, betrag_netto, belegnr} ]},
       "nicht_freigegeben": [ {kunde, bezeichnung, belegnr} | {hinweis} ],
       "offene_zeilen": {kunde: anzahl},  # nicht freigegebene Zeilen je Kunde
+      "erledigt": [ {kunde, bezeichnung, belegnr, vermerk} ],  # bereits abgerechnet (z.B. Re-Nr)
       "zeitraum_zeilen": int,   # Zeilen im Zeitraum (abgerechnet + übersprungen)
     }
+
+
+Erledigt-Vermerk: Nach einer finalen Rechnung schreibt
+vermerke_rechnungsnummern() die Rechnungsnummer in die Freigabe-Spalte
+der abgerechneten Zeilen ('ja' -> '2026-001'). Diese Zeilen gelten bei
+künftigen Läufen als bereits abgerechnet: Sie werden nicht erneut
+abgerechnet und nicht als 'nicht freigegeben' angemeckert.
 """
 from __future__ import annotations
 
@@ -38,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import AuslagenConf
-from .ods import blatt_als_dicts
+from .ods import OdsError, aendere_spalte, blatt_als_dicts
 from .util import Zeitraum, dezimal, letzter_des_monats
 
 PFLICHTSPALTEN_DEFAULT = ["datum", "kunde", "art", "bezeichnung", "betrag_netto", "belegnr"]
@@ -108,6 +116,7 @@ def lade_auslagen(
         "auslagen": {},
         "nicht_freigegeben": [],
         "offene_zeilen": {},
+        "erledigt": [],
         "zeitraum_zeilen": 0,
     }
     if not pfad.is_file():
@@ -131,6 +140,7 @@ def lade_auslagen(
 
     nicht_freigegeben: list[dict[str, Any]] = []
     offene_zeilen: dict[str, int] = {}
+    erledigt: list[dict[str, Any]] = []
     gruppe: dict[str, list[dict[str, Any]]] = {}
     freigegeben = False
     zeitraum_zeilen = 0
@@ -161,10 +171,27 @@ def lade_auslagen(
                 f"betrag_netto für Beleg {satz.get('belegnr', '?')} (Kunde {kunde}) "
                 f"ist nicht numerisch: {roh_betrag!r}"
             )
+        wert = str(satz.get(spalte, "")).strip() if hat_spalte else ""
+        wert_klein = wert.lower()
         if (
-            not hat_spalte
-            or str(satz.get(spalte, "")).strip().lower() not in {"yes", "ja"}
+            hat_spalte
+            and wert_klein not in {"yes", "ja", "no", "nein"}
+            and wert != ""
         ):
+            # bereits abgerechnet: In der Freigabe-Spalte steht z.B. die
+            # Rechnungsnummer ('ja' -> '2026-001', siehe
+            # vermerke_rechnungsnummern). Nicht erneut abgerechnet,
+            # keine WARNUNG.
+            erledigt.append(
+                {
+                    "kunde": kunde,
+                    "bezeichnung": str(satz.get("bezeichnung", "")).strip(),
+                    "belegnr": str(satz.get("belegnr", "")).strip(),
+                    "vermerk": wert,
+                }
+            )
+            continue
+        if wert_klein not in {"yes", "ja"}:
             nicht_freigegeben.append(
                 {
                     "kunde": kunde,
@@ -200,8 +227,48 @@ def lade_auslagen(
         "auslagen": gruppe,
         "nicht_freigegeben": nicht_freigegeben,
         "offene_zeilen": offene_zeilen,
+        "erledigt": erledigt,
         "zeitraum_zeilen": zeitraum_zeilen,
     }
+
+
+def vermerke_rechnungsnummern(
+    conf: AuslagenConf, zeitraum: Zeitraum, renr_je_kunde: dict[str, str]
+) -> int:
+    """Schreibt die Rechnungsnummer in die Freigabe-Spalte abgerechneter Zeilen.
+
+    Für jeden Kunden in renr_je_kunde ({kunde: rechnungsnummer}) werden die
+    Zeilen des Zeitraums mit freigabe=yes/ja in der Auslagen-ODS 'erledigt':
+    In der Freigabe-Spalte steht danach die Rechnungsnummer statt 'ja'.
+    Die Zeile wird bei künftigen Läufen als bereits abgerechnet erkannt
+    (keine erneute Abrechnung, keine WARNUNG). Gibt die Anzahl der
+    markierten Zeilen zurück.
+    """
+    if not renr_je_kunde:
+        return 0
+    von = _dt.date(zeitraum.jahr, zeitraum.erster_monat, 1)
+    bis = letzter_des_monats(zeitraum.jahr, zeitraum.letzter_monat)
+    spalte = str(conf.freigabe_spalte).strip().lower()
+
+    def _neuer_wert(satz: dict[str, Any]) -> str | None:
+        wert = str(satz.get(spalte, "")).strip()
+        if wert.lower() not in {"yes", "ja"}:
+            return None  # nicht freigegeben oder bereits erledigt
+        kunde = str(satz.get("kunde", "")).strip()
+        if kunde not in renr_je_kunde:
+            return None
+        try:
+            datum = _als_datum(satz.get("datum"))
+        except AuslagenError:
+            return None
+        if not (von <= datum <= bis):
+            return None
+        return renr_je_kunde[kunde]
+
+    try:
+        return aendere_spalte(Path(conf.datei), conf.blatt, conf.freigabe_spalte, _neuer_wert)
+    except OdsError as exc:
+        raise AuslagenError(str(exc)) from exc
 
 
 def auslagen_summe(zeilen: list[dict[str, Any]]) -> Decimal:

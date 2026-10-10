@@ -13,7 +13,7 @@ Faktur-X-XML (ZUGFeRD, Profil EN 16931). Versand per SMTP im finalen Lauf.
 | Stundenposition | **eine Sammelposition** je Kunde und Zeitraum |
 | Format | **ZUGFeRD** (PDF/A-3 mit eingebettetem Faktur-X-XML, EN 16931) |
 | Kundendaten | **pro User** in conf/<user>-kunden.ods |
-| Auslagen | **zentrale ODS** je User: conf/<user>-auslagen.ods (Zeitraum via datum-Spalte) |
+| Auslagen | **zentrale ODS** je User: conf/<user>-auslagen.ods (Zuordnung via Freigabe-Spalte) |
 | Zeitraum | Einzelmonat, Monatsbereich oder Quartal |
 | Ausführung | lokal beim Rechnungsersteller |
 
@@ -32,11 +32,11 @@ Bei Mehrmonats-Zeiträumen gilt:
 - **iCal**: alle Termine vom ersten Tag des ersten bis zum letzten Tag des
   letzten Monats (Zeitzonen werden normalisiert).
 - **Auslagen**: **eine zentrale Datei** `<user>-auslagen.ods` – die Spalte
-  `datum` entscheidet, welche Zeilen zum Zeitraum gehören (Zeilen anderer
-  Monate/Jahre bleiben unberührt). Existiert die Datei **nicht**, fragt das
+  `freigabe` entscheidet, welche Zeilen abgerechnet werden (Datum-unabhängig,
+  siehe Abschnitt Auslagen-ODS). Existiert die Datei **nicht**, fragt das
   CLI **zu Beginn** um Bestätigung – **Default ist Fortfahren** (Enter oder
   `j`); nur `n`/`nein` bricht ab. Ansonsten weist das CLI generell auf die
-  Auslagenlage hin (Zeilen im Zeitraum, abgerechnet, übersprungen).
+  Auslagenlage hin (Zeilen gesamt, abgerechnet, übersprungen).
   Freigabe zeilenweise über die Spalte `freigabe` (siehe unten).
 - **Rechnungsdatum** = letzter Tag des letzten Monats des Zeitraums,
   Zahlungsziel ab diesem Datum.
@@ -120,11 +120,12 @@ bereits existiert; `--force` überschreibt; `--beispiel` fügt Alice-Demozeilen
 mit allen Freigabe-Zuständen ein).
 
 **Eine zentrale Datei je User** ([auslagen] datei, z.B.
-`conf/philipp-auslagen.ods`), wie die `<user>-kunden.ods`. Die Spalte
-`datum` entscheidet über die Zuordnung: Nur Zeilen, deren Datum im
-Abrechnungszeitraum liegt, werden berücksichtigt – alle Zeilen bleiben in
-der Datei liegen und werden fortlaufend ergänzt. Datum als ODS-Datumzelle,
-`TT.MM.JJJJ` oder `JJJJ-MM-TT`.
+`conf/philipp-auslagen.ods`), wie die `<user>-kunden.ods`. **Die Spalte `datum` ist reine Beleginformation** – die Zuordnung läuft
+allein über die Spalte `freigabe`: Jede freigegebene Zeile (`ja`/`yes`)
+fließt in die nächste Rechnung, unabhängig von Datum und Abrechnungs-
+zeitraum. Alle Zeilen bleiben in der Datei liegen und werden fortlaufend
+ergänzt. Datum als ODS-Datumzelle, `TT.MM.JJJJ` oder `JJJJ-MM-TT`
+(leer/ungültig ist erlaubt).
 
 **Blatt 'Auslagen'** (eine Zeile pro Beleg):
 
@@ -142,12 +143,13 @@ freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (i
 - `yes` oder `ja` → Zeile wird abgerechnet (Groß-/Kleinschreibung egal).
 - leer/`no`/`nein` → Zeile wird **übersprungen** (Ausgabe: WARNUNG je Zeile).
 - Die Rechnung ist **finale** (echte Re-Nr, State, ZUGFeRD, Versand), sobald
-  **mindestens eine** Zeile des Zeitraums `yes`/`ja` hat – sonst ENTWURF.
+  **mindestens eine** Zeile der Datei `yes`/`ja` hat – sonst ENTWURF.
 - Fehlt die Spalte komplett: keine Zeile freigegeben → ENTWURF + WARNUNG.
 
 **Erledigt-Vermerk (Schutz vor doppelter Abrechnung):** Nach einem finalen
 Lauf (`--invoice`/`--full`, ohne `--dry-run`) trägt REU die **Rechnungsnummer
-in die Freigabe-Spalte** der abgerechneten Zeilen ein (`ja` → `2026-001`).
+in die Freigabe-Spalte** ALLER abgerechneten Zeilen ein (`ja` → `2026-001`,
+datum-unabhängig).
 Diese Zeilen gelten bei künftigen Läufen als **bereits abgerechnet**:
 Sie werden nicht erneut abgerechnet und nicht als nicht freigegeben
 angemeckert (in der Zusammenfassung als „bereits abgerechnet" gezählt,
@@ -158,18 +160,19 @@ und der Lauf bleibt unberührt.
 
 ## Kunden-Berücksichtigung je Zeitraum
 
-**Jeder Kunde, der im Abrechnungszeitraum eines der Gewerke genutzt hat,
-wird berücksichtigt** – egal welches:
+**Jeder Kunde, der eines der Gewerke genutzt hat (Stunden/Services im
+Zeitraum, freigegebene Auslagen datum-unabhängig), wird berücksichtigt** –
+egal welches:
 
 - **Arbeitsstunden** (iCal-Termine mit Kundenkürzel im Zeitraum)
 - **Services** (Blatt 'Services', Menge > 0 in einem Zeitraum-Monat)
-- **Auslagen** (Zeilen der zentralen Auslagen-ODS mit Datum im Zeitraum)
+- **Auslagen** (freigegebene Zeilen der zentralen Auslagen-ODS – datum-unabhängig)
 
 Auch Kunden mit **nur einem** Gewerk (nur Stunden, nur Services oder nur
 Auslagen) bekommen eine eigene Rechnung. Sonderfall Auslagen: Die
-Rechnung entsteht erst, sobald mindestens eine Zeile des Kunden im
-Zeitraum `freigabe` = `yes`/`ja` hat. Hat ein Kunde im Zeitraum nur
-**offene** (nicht freigegebene) Auslagen und sonst nichts, erhält er
+Rechnung entsteht erst, sobald mindestens eine Zeile des Kunden
+`freigabe` = `yes`/`ja` hat. Hat ein Kunde nur **offene** (nicht
+freigegebene) Auslagen und sonst nichts, erhält er
 noch **keine** Rechnung – er wird stattdessen ausdrücklich gemeldet:
 `Hinweis: <kunde> – N nicht freigegebene Auslagenzeile(n) … noch keine
 Rechnung, bis freigabe=yes/ja`. Kein Kunde verschwindet stillschweigend.

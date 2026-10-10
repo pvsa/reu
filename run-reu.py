@@ -118,22 +118,22 @@ def cmd_expenses(cfg: Config, zeitraum: Zeitraum) -> int:
         print("Keine Auslagen-ODS (bestätigt) – nichts zu prüfen.")
         return 0
     kunden = _lade_kunden(cfg)
-    erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
-    if erg["zeitraum_zeilen"] == 0:
-        print(f"Keine Auslagenzeilen für {zeitraum.text} in {cfg.auslagen.datei}.")
+    erg = expenses_mod.lade_auslagen(cfg.auslagen, set(kunden))
+    if erg["zeilen_gesamt"] == 0:
+        print(f"Keine Auslagenzeilen in {cfg.auslagen.datei}.")
         return 0
     print(
-        f"Auslagen {zeitraum.text} – Freigabe: "
+        f"Auslagen – Freigabe: "
         f"{'JA' if erg['freigegeben'] else 'NEIN (Entwurf)'} – "
-        f"{erg['zeitraum_zeilen']} Zeile(n) im Zeitraum"
+        f"{erg['zeilen_gesamt']} Zeile(n) gesamt"
     )
     _warne_nicht_freigegeben(erg)
     # Kunden mit nur offenen (nicht freigegebenen) Auslagen ausdrücklich
     # nennen – sie dürfen nicht stillschweigend fehlen:
     for k in sorted(erg.get("offene_zeilen", {})):
         print(
-            f"Hinweis: {k} – {erg['offene_zeilen'][k]} nicht freigegebene "
-            f"Auslagenzeile(n) für {zeitraum.text} (noch nicht abgerechnet)."
+            f"Hinweis: {k} – {erg['offene_zeilen'][k]} offene, nicht "
+            f"freigegebene Auslagenzeile(n) (noch nicht abgerechnet)."
         )
     # bereits abgerechnete Zeilen (Re-Nr eingetragen) je Beleg melden:
     for e in erg.get("erledigt", []):
@@ -258,24 +258,24 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
         if services_mod.positionen_fuer_zeitraum(svc, zeitraum)
     }
     stunden_alle = ical_mod.lade_stunden(cfg.ical, zeitraum)
-    auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, zeitraum, set(kunden))
+    auslagen_erg = expenses_mod.lade_auslagen(cfg.auslagen, set(kunden))
     # Genereller Hinweis auf die Auslagenlage
     if not auslagen_erg["datei_vorhanden"]:
         print(
             f"Hinweis: keine Auslagen-ODS ({cfg.auslagen.datei}) – "
             "Rechnung nur mit Stunden/Services."
         )
-    elif auslagen_erg["zeitraum_zeilen"] == 0:
-        print(f"Hinweis: keine Auslagenzeilen für {zeitraum.text} in {cfg.auslagen.datei}.")
+    elif auslagen_erg["zeilen_gesamt"] == 0:
+        print(f"Hinweis: keine Auslagenzeilen in {cfg.auslagen.datei}.")
     else:
         abgerechnet = sum(len(v) for v in auslagen_erg["auslagen"].values())
         bereits = len(auslagen_erg.get("erledigt", []))
-        hinweis = f"Auslagen: {auslagen_erg['zeitraum_zeilen']} Zeile(n) für {zeitraum.text}, {abgerechnet} abgerechnet"
+        hinweis = f"Auslagen: {auslagen_erg['zeilen_gesamt']} Zeile(n) gesamt, {abgerechnet} abgerechnet"
         if bereits:
             hinweis += f", {bereits} bereits abgerechnet (Re-Nr eingetragen)"
         print(hinweis + ".")
     _warne_nicht_freigegeben(auslagen_erg)
-    # freigegeben = Spalte 'freigabe' = 'yes' in mindestens EINER Zeile des Zeitraums.
+    # freigegeben = Spalte 'freigabe' = 'yes'/'ja' in mindestens EINER Zeile der Datei.
     # Im Dry-Run wird die ZUGFeRD-PDF trotzdem erzeugt (zum Prüfen);
     # Re-Nr/State/Versand steuert dry_run separat.
     freigegeben = auslagen_erg["freigegeben"]
@@ -305,8 +305,9 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
         ergebnisse.append(erg)
         print(f"{'ENTWURF ' if erg['entwurf'] else 'FINALE  '}{k}: {erg['renr']}  Netto {euro(erg['summen']['netto'])}  Brutto {euro(erg['summen']['brutto'])}  → {erg['pdf']}")
 
-    # Jeder Kunde, der im Zeitraum ein Gewerk genutzt hat (Arbeitsstunden,
-    # Services, Auslagen), muss berücksichtigt sein. Kunden mit NUR offenen
+    # Jeder Kunde, der ein Gewerk genutzt hat (Stunden/Services im Zeitraum,
+    # freigegebene Auslagen datum-unabhängig), muss berücksichtigt sein.
+    # Kunden mit NUR offenen
     # (nicht freigegebenen) Auslagen bekommen noch keine Rechnung – sie
     # dürfen aber nicht stillschweigend fehlen:
     abgerechnet = {e["kunde"] for e in ergebnisse}
@@ -315,7 +316,7 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
             continue
         print(
             f"Hinweis: {k} – {auslagen_erg['offene_zeilen'][k]} nicht freigegebene "
-            f"Auslagenzeile(n) für {zeitraum.text}: noch keine Rechnung, "
+            f"Auslagenzeile(n): noch keine Rechnung, "
             "bis in der Auslagen-ODS freigabe=yes/ja gesetzt ist."
         )
     # Bereits abgerechnete Auslagen (Re-Nr in der Freigabe-Spalte) je Kunde
@@ -340,7 +341,7 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
         renr_je_kunde = {e["kunde"]: e["renr"] for e in ergebnisse if not e["entwurf"]}
         if renr_je_kunde:
             try:
-                n_markiert = expenses_mod.vermerke_rechnungsnummern(cfg.auslagen, zeitraum, renr_je_kunde)
+                n_markiert = expenses_mod.vermerke_rechnungsnummern(cfg.auslagen, renr_je_kunde)
                 if n_markiert:
                     print(f"Auslagen-ODS: {n_markiert} Zeile(n) mit Rechnungsnummer als erledigt markiert.")
             except expenses_mod.AuslagenError as exc:

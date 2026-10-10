@@ -13,7 +13,7 @@ Faktur-X-XML (ZUGFeRD, Profil EN 16931). Versand per SMTP im finalen Lauf.
 | Stundenposition | **eine Sammelposition** je Kunde und Zeitraum |
 | Format | **ZUGFeRD** (PDF/A-3 mit eingebettetem Faktur-X-XML, EN 16931) |
 | Kundendaten | **pro User** in conf/<user>-kunden.ods |
-| Auslagen | lokale ODS, Pfad mit {year}/{month} (pro Monat, wird gemerged) |
+| Auslagen | **zentrale ODS** je User: conf/<user>-auslagen.ods (Zeitraum via datum-Spalte) |
 | Zeitraum | Einzelmonat, Monatsbereich oder Quartal |
 | Ausführung | lokal beim Rechnungsersteller |
 
@@ -62,7 +62,10 @@ reu/
 ├── conf/
 │   ├── alice.conf          # EINZIGE Beispiel-Config
 │   ├── alice-kunden.ods    # Beispiel-Kundenstammdaten
+│   ├── alice-auslagen.ods  # zentrale Auslagen-ODS (per tools/neue_auslagen.py erzeugbar)
 │   └── alice.state.json    # (wird beim finalen Lauf angelegt)
+├── tools/
+│   └── neue_auslagen.py    # erzeugt conf/<user>-auslagen.ods
 ├── out/
 │   ├── final/              # finale Rechnungen
 │   └── dry-run/            # Entwürfe / Dry-Run-Ausgaben
@@ -110,6 +113,11 @@ Rechnungs-Erstseite (und im ZUGFeRD-XML). Kunden mit nur Service-Einheiten
 (ohne Stunden/Auslagen) bekommen ebenfalls eine Rechnung.
 
 ## Auslagen-ODS conf/<user>-auslagen.ods
+
+**Anlegen:** `python3 tools/neue_auslagen.py <user>
+[--beispiel]` erzeugt die Datei mit korrektem Header (Abbruch, wenn sie
+bereits existiert; `--force` überschreibt; `--beispiel` fügt Alice-Demozeilen
+mit allen Freigabe-Zuständen ein).
 
 **Eine zentrale Datei je User** ([auslagen] datei, z.B.
 `conf/philipp-auslagen.ods`), wie die `<user>-kunden.ods`. Die Spalte

@@ -12,6 +12,9 @@ werden übersprungen und in 'nicht_freigegeben' gemeldet. Die Rechnung
 gilt als freigegeben (finale Re-Nr, ZUGFeRD, Versand), sobald MINDESTENS
 EINE Zeile des Zeitraums freigegeben ist.
 
+Spaltentitel (Header) sind groß-/kleinschreibungsagnostisch – 'Freigabe'
+wie 'freigabe', 'Datum' wie 'datum' (wie beim Services-Blatt).
+
 Existiert die Auslagen-Datei gar nicht, liefert lade_auslagen ein
 leeres Ergebnis ('datei_vorhanden': False) – das CLI fragt dann zu
 Beginn um Bestätigung und weist ansonsten generell auf die
@@ -69,6 +72,20 @@ def _leere_zeile(satz: dict[str, Any]) -> bool:
     return all(v is None or not str(v).strip() for v in satz.values())
 
 
+def _norm_satz(satz: dict[str, Any]) -> dict[str, Any]:
+    """Normalisiert Header-Schlüssel: 'Freigabe' -> 'freigabe' etc.
+
+    Spaltentitel sind damit groß-/kleinschreibungsagnostisch – wie beim
+    Services-Blatt ('Kunde' wie 'kunde'). Leerzeichen am Rand entfallen.
+    """
+    aus: dict[str, Any] = {}
+    for schluessel, wert in satz.items():
+        k = str(schluessel).strip().lower()
+        if k and k not in aus:
+            aus[k] = wert
+    return aus
+
+
 def auslagen_datei_vorhanden(conf: AuslagenConf) -> bool:
     """True, wenn die Auslagen-ODS ([auslagen] datei) existiert."""
     return Path(conf.datei).is_file()
@@ -95,16 +112,19 @@ def lade_auslagen(
     }
     if not pfad.is_file():
         return leer
-    saetze = blatt_als_dicts(pfad, conf.blatt)
-    pflichtspalten = conf.pflichtspalten or PFLICHTSPALTEN_DEFAULT
+    # Header normalisieren ('Freigabe' == 'freigabe', 'Datum' == 'datum')
+    saetze = [_norm_satz(s) for s in blatt_als_dicts(pfad, conf.blatt)]
+    pflichtspalten = [str(p).strip().lower() for p in (conf.pflichtspalten or PFLICHTSPALTEN_DEFAULT)]
     if saetze:
         vorhandene = set(saetze[0].keys())
         fehlt = [s for s in pflichtspalten if s not in vorhandene]
         if fehlt:
             raise AuslagenError(
-                f"Pflichtspalten fehlen in {pfad}!{conf.blatt}: {', '.join(fehlt)}"
+                f"Pflichtspalten fehlen in {pfad}!{conf.blatt}: {', '.join(fehlt)} "
+                f"(Groß-/Kleinschreibung der Spaltentitel ist egal; vorhanden: "
+                f"{', '.join(sorted(vorhandene))})"
             )
-    spalte = conf.freigabe_spalte
+    spalte = str(conf.freigabe_spalte).strip().lower()
     hat_spalte = bool(saetze) and spalte in saetze[0]
     von = _dt.date(zeitraum.jahr, zeitraum.erster_monat, 1)
     bis = letzter_des_monats(zeitraum.jahr, zeitraum.letzter_monat)

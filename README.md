@@ -125,6 +125,8 @@ der Datei liegen und werden fortlaufend ergänzt. Datum als ODS-Datumzelle,
 
 Pflichtspalten konfigurierbar (pflichtspalten); Standard wie oben (ohne
 freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (immer 19 %).
+**Spaltentitel sind groß-/kleinschreibungsagnostisch** – 'Freigabe' wie
+'freigabe', 'Datum' wie 'datum' (wie beim Services-Blatt).
 
 **Freigabe zeilenweise** über die Spalte `freigabe` (Name konfigurierbar
 über [auslagen] freigabe_spalte, Default `freigabe`):

@@ -13,7 +13,8 @@ Außerdem werden zwei Anlage-Seiten beigelegt:
   - Anlage 'Arbeitsstunden' (Spalten: Datum, Startzeit, Beschreibung, Dauer)
   - Anlage 'Auslagen' (Spalten: Datum, Art, Bezeichnung, Beleg-Nr., Betrag)
 
-Erste Seite im Briefkopf-Stil: Logo oben links, Adressfeld darunter.
+Erste Seite im Briefkopf-Stil: Logo oben links, Absender + Rechnungsdaten
+oben rechts auf Logo-Höhe, Empfänger-Adressfeld darunter.
 """
 from __future__ import annotations
 
@@ -58,9 +59,6 @@ def _styles() -> dict[str, ParagraphStyle]:
         "normal": ParagraphStyle("normal", parent=styles["Normal"], fontSize=9, leading=12),
         "klein": ParagraphStyle("klein", parent=styles["Normal"], fontSize=8, leading=10),
         "fuss": ParagraphStyle("fuss", parent=styles["Normal"], fontSize=8, leading=11),
-        "kopf_rechts": ParagraphStyle(
-            "kopf_rechts", parent=styles["Normal"], fontSize=9, leading=12, alignment=2
-        ),
     }
 
 
@@ -73,13 +71,14 @@ def _adresse_kunde(k: Kunde) -> str:
     return "<br/>".join(zeilen)
 
 
-def _adresse_leistender(l: Leistender) -> str:
+def _adresse_leistender_zeilen(l: Leistender) -> list[str]:
+    """Absenderadresse als Einzelzeilen (für den Briefkopf oben rechts)."""
     zeilen = [l.name]
     if l.strasse:
         zeilen.append(l.strasse)
     zeilen.append(f"{l.plz} {l.ort}")
     zeilen.append(l.land)
-    return "<br/>".join(zeilen)
+    return zeilen
 
 
 def _positionen(
@@ -291,49 +290,58 @@ def erzeuge_rechnung_pdf(
     pos_zeilen, summen = _positionen(kunde, stunden, auslagen, services, zeitraum)
 
     story: list = []
-    # Briefkopf: Logo wird auf der ersten Seite direkt auf dem Canvas
-    # gezeichnet (onFirstPage-Callback) – garantiert oben links am
-    # Satzspiegelrand, unabhängig von Flowable-Alignment-Eigenheiten
-    # der reportlab-Version. Im Story bleibt nur der Platzhalter-Abstand.
+    # Briefkopf: Logo (oben links) und der rechte Block mit Absender +
+    # Rechnungsdaten werden auf der ersten Seite direkt auf dem Canvas
+    # gezeichnet (onFirstPage-Callback) – beide mit Oberkante an der
+    # topMargin-Kante, also auf gleicher Höhe, unabhängig von
+    # Flowable-Alignment-Eigenheiten der reportlab-Version.
+    # Im Story bleibt nur der Platzhalter-Abstand.
     logo_w, logo_h = 31.5 * mm, 14 * mm
     hat_logo = cfg.logo_path.is_file()
 
-    def _briefkopf_logo(canvas, doc):  # noqa: ANN001 – reportlab-Signatur
-        if not hat_logo:
-            return
-        try:
-            canvas.drawImage(
-                str(cfg.logo_path),
-                doc.leftMargin,
-                doc.pagesize[1] - doc.topMargin - logo_h,
-                width=logo_w,
-                height=logo_h,
-                mask="auto",
-            )
-        except Exception:  # noqa: BLE001 – Logo darf den Druck nie blockieren
-            pass
+    def _briefkopf(canvas, doc):  # noqa: ANN001 – reportlab-Signatur
+        # Logo oben links am Satzspiegelrand
+        if hat_logo:
+            try:
+                canvas.drawImage(
+                    str(cfg.logo_path),
+                    doc.leftMargin,
+                    doc.pagesize[1] - doc.topMargin - logo_h,
+                    width=logo_w,
+                    height=logo_h,
+                    mask="auto",
+                )
+            except Exception:  # noqa: BLE001 – Logo darf den Druck nie blockieren
+                pass
+        # Rechter Block: Absenderadresse + Rechnungsdaten, oben rechts,
+        # Oberkante auf gleicher Höhe wie das Logo (topMargin-Kante).
+        canvas.saveState()
+        canvas.setFont("Helvetica", 9)
+        x_rechts = doc.pagesize[0] - doc.rightMargin
+        y = doc.pagesize[1] - doc.topMargin - 6.5
+        for zeile in _adresse_leistender_zeilen(cfg.leistender):
+            canvas.drawRightString(x_rechts, y, zeile)
+            y -= 12
+        y -= 4  # kleine Lücke zwischen Absender und Rechnungsdaten
+        for zeile in (
+            f"Rechnungsdatum: {re_datum.isoformat()}",
+            f"Rechnungsnummer: {renr}",
+            f"Leistungszeitraum: {zeitraum.text}",
+        ):
+            canvas.drawRightString(x_rechts, y, zeile)
+            y -= 12
+        canvas.restoreState()
 
     story.append(Spacer(1, (logo_h + 12 * mm) if hat_logo else 16 * mm))
 
-    # Kopf: Empfänger links, Absender/Re-Nr rechts
+    # Empfängeradresse links (Absender + Re-Daten stehen oben rechts,
+    # per Canvas auf Logo-Höhe – siehe _briefkopf)
     story.append(Spacer(1, 4 * mm))
-    kopf = Table(
-        [
-            [Paragraph(_adresse_kunde(kunde), styles["normal"]),
-             Paragraph(_adresse_leistender(cfg.leistender), styles["kopf_rechts"])],
-            ["",
-             Paragraph(
-                 f"Rechnungsdatum: {re_datum.isoformat()}<br/>"
-                 f"Rechnungsnummer: {renr}<br/>"
-                 f"Leistungszeitraum: {zeitraum.text}",
-                 styles["kopf_rechts"],
-             )],
-        ],
-        colWidths=[90 * mm, 90 * mm],
-    )
-    kopf.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    story.append(kopf)
-    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph(_adresse_kunde(kunde), styles["normal"]))
+    # Ausgleich: Der Re-Daten-Block (3 Zeilen à 12 pt) steht jetzt oben
+    # rechts im Canvas statt unter der Absenderadresse – dieser Abstand
+    # hält Titel und Positionstabelle auf der gewohnten Höhe.
+    story.append(Spacer(1, 6 * mm + 36))
 
     story.append(Paragraph("Rechnung", styles["titel"]))
     if entwurf:
@@ -417,5 +425,5 @@ def erzeuge_rechnung_pdf(
         title=f"Rechnung {renr}",
         author=cfg.leistender.name,
     )
-    doc.build(story, onFirstPage=_briefkopf_logo)
+    doc.build(story, onFirstPage=_briefkopf)
     return summen

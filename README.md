@@ -155,6 +155,10 @@ Rechnung, bis freigabe=yes/ja`. Kein Kunde verschwindet stillschweigend.
 
 ## Rechnungsaufbau (PDF)
 
+- **Briefkopf (Erstseite)**: Logo oben links am Satzspiegelrand; rechts
+  daneben Absenderadresse + Rechnungsdatum/-nummer/Leistungszeitraum,
+  **oben rechts auf gleicher Höhe wie das Logo** (Oberkante an der
+  oberen Satzspiegelkante, rechtsbündig). Empfängeradresse darunter links.
 - **Erstseite**: Positionstabelle + Summenblock. Spalten:
   `Pos. | Bezeichnung | Menge | Einzelpreis | Netto` (ohne Einheiten-Spalte;
   Einheiten stehen nur im ZUGFeRD-XML). Lange Bezeichnungen brechen

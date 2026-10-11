@@ -15,6 +15,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import drafthorse
 from drafthorse.models.accounting import ApplicableTradeTax
 from drafthorse.models.document import Document
 from drafthorse.models.note import IncludedNote
@@ -38,6 +39,78 @@ WAehrUNG = "EUR"
 
 class ZugferdError(Exception):
     pass
+
+
+# ------------------------------------------------- drafthorse-Kompatibilitaet
+# Die Modell-API von drafthorse hat sich ueber die Versionen geaendert.
+# Diese Helfer halten erzeuge_xml kompatibel mit drafthorse 2.2 bis 2025.x:
+#
+# 1. Betraege: CurrencyField (drafthorse <= 2.4, je nach Einzelfeld, z.B.
+#    MonetarySummation.tax_basis_total/grand_total in 2.4) verlangt ein
+#    2-Tupel (Betrag, Waehrung); DecimalField (2025.x) den Betrag direkt.
+# 2. IncludedNote.content: erst ab 2025.1 ein StringField (vorher
+#    MultiStringField -> Wert per .add() statt direkter Zuweisung; die
+#    wuerde AttributeError 'Read-only!' aus Field.__set__ ausloesen).
+# 3. TradeSettlement.payment_means: erst ab 2025.1 ein MultiField (vorher
+#    einzelnes Field -> Werte in-place am Element setzen statt .add()).
+#
+# drafthorse 1.x nutzt die inkompatible ZUGFeRD-1.0-API (serialize() ohne
+# schema-Parameter) und wird mit einer klaren Meldung abgewiesen.
+
+
+def _pruefe_drafthorse_version() -> None:
+    """Wirft ZugferdError bei drafthorse 1.x (ZUGFeRD-1.0-API, kein EN 16931)."""
+    version = str(getattr(drafthorse, "version", ""))
+    try:
+        hauptversion = int(version.split(".")[0])
+    except ValueError:
+        return  # unbekanntes Versionsformat: nicht blocken
+    if hauptversion < 2:
+        raise ZugferdError(
+            f"installierte drafthorse-Version {version!r} ist zu alt "
+            "(ZUGFeRD-1.0-API, kein EN 16931 / FACTUR-X). "
+            "Bitte aktualisieren: pip install -U 'drafthorse>=2.2'"
+        )
+
+
+def _betrag(objekt: Any, name: str, wert: Decimal) -> None:
+    """Setzt ein Betragsfeld versionstolerant (CurrencyField vs. DecimalField)."""
+    for klass in type(objekt).__mro__:
+        feld = klass.__dict__.get(name)
+        if feld is not None:
+            if type(feld).__name__ == "CurrencyField":
+                setattr(objekt, name, (wert, WAehrUNG))
+            else:
+                setattr(objekt, name, wert)
+            return
+    setattr(objekt, name, wert)  # Felddeklaration nicht gefunden: normal setzen
+
+
+def _notizinhalt(note: IncludedNote, text: str) -> None:
+    """IncludedNote.content versionstolerant setzen."""
+    inhalt = note.content
+    if hasattr(inhalt, "add"):  # MultiStringField (drafthorse <= 2.4)
+        inhalt.add(text)
+    else:  # StringField (drafthorse 2025.x)
+        note.content = text
+
+
+def _konfiguriere_payment_means(pm: PaymentMeans, cfg: Config) -> None:
+    pm.type_code = "58"
+    pm.payee_account.iban = (cfg.erechnung.iban or "").replace(" ", "")
+    if cfg.erechnung.bic:
+        pm.payee_institution.bic = cfg.erechnung.bic
+
+
+def _payment_means_hinzufuegen(settlement: Any, cfg: Config) -> None:
+    """PaymentMeans versionstolerant am TradeSettlement setzen."""
+    ziel = settlement.payment_means
+    if hasattr(ziel, "add"):  # MultiField (drafthorse 2025.x)
+        pm = PaymentMeans()
+        _konfiguriere_payment_means(pm, cfg)
+        ziel.add(pm)
+    else:  # einzelnes Field (drafthorse <= 2.4): in-place konfigurieren
+        _konfiguriere_payment_means(ziel, cfg)
 
 
 def _setz_party(party: Any, name: str, strasse: str, plz: str, ort: str, land: str,
@@ -71,14 +144,18 @@ def _add_lineitem(
     product.name = name
     if description:
         product.description = description
-    item.agreement.gross.amount = einzelpreis
-    item.agreement.net.amount = einzelpreis
+    _betrag(item.agreement.gross, "amount", einzelpreis)
+    _betrag(item.agreement.net, "amount", einzelpreis)
     item.delivery.billed_quantity = (menge, unit)
     tax = item.settlement.trade_tax
     tax.type_code = "VAT"
     tax.category_code = "S"
     tax.rate_applicable_percent = UST_PROZENT
-    item.settlement.monetary_summation.total_amount = (menge * einzelpreis).quantize(Decimal("0.01"))
+    _betrag(
+        item.settlement.monetary_summation,
+        "total_amount",
+        (menge * einzelpreis).quantize(Decimal("0.01")),
+    )
     document.trade.items.add(item)
 
 
@@ -96,6 +173,7 @@ def erzeuge_xml(
     zeitraum: Zeitraum,
 ) -> bytes:
     """Erzeugt validiertes Faktur-X XML (EN 16931)."""
+    _pruefe_drafthorse_version()
     document = Document()
     document.context.guideline_parameter.id = GUIDELINE_EN16931
     document.header.id = renr
@@ -103,7 +181,7 @@ def erzeuge_xml(
     document.header.issue_date_time = re_datum
 
     note = IncludedNote()
-    note.content = "E-Rechnung gem. EN 16931 (ZUGFeRD / Faktur-X)"
+    _notizinhalt(note, "E-Rechnung gem. EN 16931 (ZUGFeRD / Faktur-X)")
     note.subject_code = "REG"
     document.header.notes.add(note)
 
@@ -134,9 +212,9 @@ def erzeuge_xml(
     settlement.currency_code = WAehrUNG
 
     tax = ApplicableTradeTax()
-    tax.calculated_amount = summen["ust"]
+    _betrag(tax, "calculated_amount", summen["ust"])
     tax.type_code = "VAT"
-    tax.basis_amount = summen["netto"]
+    _betrag(tax, "basis_amount", summen["netto"])
     tax.category_code = "S"
     tax.rate_applicable_percent = UST_PROZENT
     settlement.trade_tax.add(tax)
@@ -146,12 +224,7 @@ def erzeuge_xml(
     terms.due = faelligkeit
     settlement.terms.add(terms)
 
-    pm = PaymentMeans()
-    pm.type_code = "58"
-    pm.payee_account.iban = (cfg.erechnung.iban or "").replace(" ", "")
-    if cfg.erechnung.bic:
-        pm.payee_institution.bic = cfg.erechnung.bic
-    settlement.payment_means.add(pm)
+    _payment_means_hinzufuegen(settlement, cfg)
 
     # Positionen: Stunden (falls > 0), dann Services (je Service+Monat),
     # dann EINE Sammelposition Auslagen – konsistent zur PDF (Details in Anlage).
@@ -194,13 +267,13 @@ def erzeuge_xml(
         )
 
     mon = settlement.monetary_summation
-    mon.line_total = summen["netto"]
-    mon.charge_total = Decimal("0")
-    mon.allowance_total = Decimal("0")
-    mon.tax_basis_total = summen["netto"]
-    mon.tax_total = summen["ust"]
-    mon.grand_total = summen["brutto"]
-    mon.due_amount = summen["brutto"]
+    _betrag(mon, "line_total", summen["netto"])
+    _betrag(mon, "charge_total", Decimal("0"))
+    _betrag(mon, "allowance_total", Decimal("0"))
+    _betrag(mon, "tax_basis_total", summen["netto"])
+    _betrag(mon, "tax_total", summen["ust"])
+    _betrag(mon, "grand_total", summen["brutto"])
+    _betrag(mon, "due_amount", summen["brutto"])
 
     try:
         xml = document.serialize(schema="FACTUR-X_EN16931")

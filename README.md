@@ -294,7 +294,18 @@ Hinweis: `python3-drafthorse` gibt es ab Debian 13 (trixie) bzw.
 Ubuntu 25.10; auf älteren Releases bleibt für drafthorse nur pip:
 
 ```bash
-python3 -m pip install drafthorse reportlab requests icalendar pytz
+python3 -m pip install 'drafthorse>=2.2' reportlab requests icalendar pytz
+```
+
+**drafthorse-Version:** REU unterstützt drafthorse **2.2 bis 2025.x**
+(die Modell-API hat sich zwischen den Versionen geändert – `reu/zugferd.py`
+gleicht das intern aus: CurrencyField-2-Tupel vs. DecimalField,
+MultiStringField vs. StringField für Notizen, Field vs. MultiField für
+PaymentMeans). drafthorse **1.x** nutzt die inkompatible ZUGFeRD-1.0-API
+und wird mit einer klaren Fehlermeldung abgewiesen:
+
+```bash
+python3 -m pip install -U 'drafthorse>=2.2'
 ```
 
 ## iCal-Feed

@@ -13,10 +13,10 @@
 
 ## Mittelbar / Verbesserungen
 
-- [ ] **requirements.txt** anlegen
-  (`drafthorse reportlab requests icalendar pytz`,
-  `lxml`/`pypdf` transitiv via drafthorse; ODS-Lesen läuft ohne externe
-  Abhängigkeit über die Python-stdlib).
+- [x] **requirements.txt** anlegen (`drafthorse>=2.2` – Versionen 2.2–2025.x
+  werden von `reu/zugferd.py` versionstolerant unterstützt, 1.x wird mit
+  klarer Meldung abgewiesen; `reportlab`, `requests`, `icalendar`, `pytz`;
+  `lxml`/`pypdf` transitiv via drafthorse).
 - [ ] **Volle PDF/A-3-Konformität**: Quell-PDF vor `attach_xml` PDF/A-konform
   erzeugen (ICC-Profil/OutputIntent hinterlegen, z.B. via Ghostscript
   oder reportlab PDF/A-Option), da drafthorse kein PDF/A aus dem Nichts baut.

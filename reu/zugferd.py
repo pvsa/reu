@@ -45,9 +45,11 @@ class ZugferdError(Exception):
 # Die Modell-API von drafthorse hat sich ueber die Versionen geaendert.
 # Diese Helfer halten erzeuge_xml kompatibel mit drafthorse 2.2 bis 2025.x:
 #
-# 1. Betraege: CurrencyField (drafthorse <= 2.4, je nach Einzelfeld, z.B.
-#    MonetarySummation.tax_basis_total/grand_total in 2.4) verlangt ein
-#    2-Tupel (Betrag, Waehrung); DecimalField (2025.x) den Betrag direkt.
+# 1. Betraege: CurrencyField (z.B. MonetarySummation.tax_basis_total/
+#    grand_total bis drafthorse 2025.1) akzeptiert den Betrag direkt und
+#    setzt intern die Waehrung auf None. Ein 2-Tupel mit Waehrung wuerde
+#    das XML-Attribut currencyID schreiben, das EN 16931 (CII-DT-031)
+#    verbietet – die Waehrung steht allein im InvoiceCurrencyCode.
 # 2. IncludedNote.content: erst ab 2025.1 ein StringField (vorher
 #    MultiStringField -> Wert per .add() statt direkter Zuweisung; die
 #    wuerde AttributeError 'Read-only!' aus Field.__set__ ausloesen).
@@ -74,16 +76,19 @@ def _pruefe_drafthorse_version() -> None:
 
 
 def _betrag(objekt: Any, name: str, wert: Decimal) -> None:
-    """Setzt ein Betragsfeld versionstolerant (CurrencyField vs. DecimalField)."""
-    for klass in type(objekt).__mro__:
-        feld = klass.__dict__.get(name)
-        if feld is not None:
-            if type(feld).__name__ == "CurrencyField":
-                setattr(objekt, name, (wert, WAehrUNG))
-            else:
-                setattr(objekt, name, wert)
-            return
-    setattr(objekt, name, wert)  # Felddeklaration nicht gefunden: normal setzen
+    """Setzt ein Betragsfeld versionstolerant – OHNE currencyID-Attribut.
+
+    CurrencyField akzeptiert den Betrag direkt (drafthorse >= 2.2 setzt
+    intern die Waehrung auf None). Nur falls eine sehr alte drafthorse-
+    Version CurrencyField noch ein 2-Tupel verlangt, wird (wert, None)
+    gesetzt – ebenfalls ohne currencyID, denn EN 16931 (CII-DT-031)
+    verbietet das Attribut auf Betragsfeldern (Waehrung steht allein im
+    InvoiceCurrencyCode).
+    """
+    try:
+        setattr(objekt, name, wert)
+    except TypeError:
+        setattr(objekt, name, (wert, None))
 
 
 def _notizinhalt(note: IncludedNote, text: str) -> None:

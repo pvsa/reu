@@ -226,6 +226,21 @@ def _stunden_anlage(stunden: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitr
     return story
 
 
+def _belegnr_zelle(belegnr: object, style) -> Any:
+    """Beleg-Nr. als Zelle – lange Nummern zwei zeilig umbrechen.
+
+    Belegnummern (z.B. 13-stellige Lieferanten-Rechnungsnummern) sind
+    breiter als die schmale Beleg-Nr.-Spalte der Auslagen-Anlage und
+    laufen sonst in die Nachbarspalte. Ab 13 Zeichen wird die Nummer
+    mittig in zwei Zeilen gebrochen (Paragraph mit <br/>).
+    """
+    text = str(belegnr or "").strip()
+    if not text or len(text) <= 12:
+        return text
+    mitte = (len(text) + 1) // 2
+    return Paragraph(escape(text[:mitte]) + "<br/>" + escape(text[mitte:]), style)
+
+
 def _auslagen_anlage(auslagen: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitraum) -> list:
     """Auslagentabelle als Anlage-Seite."""
     styles = _styles()
@@ -241,7 +256,7 @@ def _auslagen_anlage(auslagen: list[dict[str, Any]], kunde: Kunde, zeitraum: Zei
                 str(a["datum"]),
                 a["art"],
                 a["bezeichnung"],
-                a["belegnr"],
+                _belegnr_zelle(a["belegnr"], styles["normal"]),
                 euro(a["betrag_netto"]),
             ]
         )
@@ -313,8 +328,8 @@ def erzeuge_rechnung_pdf(
                 )
             except Exception:  # noqa: BLE001 – Logo darf den Druck nie blockieren
                 pass
-        # Rechter Block: Absenderadresse + Rechnungsdaten, oben rechts,
-        # Oberkante auf gleicher Höhe wie das Logo (topMargin-Kante).
+        # Rechter Block: Absenderadresse oben rechts auf Logo-Höhe
+        # (topMargin-Kante), Rechnungsdaten auf Höhe des Empfängers links.
         canvas.saveState()
         canvas.setFont("Helvetica", 9)
         x_rechts = doc.pagesize[0] - doc.rightMargin
@@ -322,7 +337,15 @@ def erzeuge_rechnung_pdf(
         for zeile in _adresse_leistender_zeilen(cfg.leistender):
             canvas.drawRightString(x_rechts, y, zeile)
             y -= 12
-        y -= 4  # kleine Lücke zwischen Absender und Rechnungsdaten
+        # Rechnungsdaten (Re-Datum/-Nr./Leistungszeitraum) auf GLEICHER
+        # Höhe wie der Empfänger links: derselbe Spacer-Stack wie vor
+        # der Empfängeradresse im Story (Logo-Abstand + 4 mm); die erste
+        # Zeile sitzt ~9 pt (Helvetica 9) unter der Absatz-Oberkante auf
+        # der Basislinie der ersten Adresszeile, der Zeilenabstand 12 pt
+        # entspricht dem leading des normalen Stils – die drei Zeilen
+        # laufen damit zeilengenau mit der Empfängeradresse.
+        abstand_empfaenger = ((logo_h + 12 * mm) if hat_logo else 16 * mm) + 4 * mm
+        y = doc.pagesize[1] - doc.topMargin - abstand_empfaenger - 9
         for zeile in (
             f"Rechnungsdatum: {re_datum.isoformat()}",
             f"Rechnungsnummer: {renr}",

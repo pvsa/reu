@@ -47,9 +47,11 @@ class ZugferdError(Exception):
 #
 # 1. Betraege: CurrencyField (z.B. MonetarySummation.tax_basis_total/
 #    grand_total bis drafthorse 2025.1) akzeptiert den Betrag direkt und
-#    setzt intern die Waehrung auf None. Ein 2-Tupel mit Waehrung wuerde
-#    das XML-Attribut currencyID schreiben, das EN 16931 (CII-DT-031)
-#    verbietet – die Waehrung steht allein im InvoiceCurrencyCode.
+#    setzt intern die Waehrung auf None – kein currencyID-Attribut.
+#    Das 2-Tupel (wert, waehrung) schreibt currencyID: zulässig und von
+#    BR-CO-15 GEFORDERT, aber nur auf ram:TaxTotalAmount (BT-110) – auf
+#    allen anderen Amount-Elementen ist es CII-DT-031 (fatal) verboten.
+#    Daher: _betrag (ohne Attribut) und _betrag_waehrung (nur tax_total).
 # 2. IncludedNote.content: erst ab 2025.1 ein StringField (vorher
 #    MultiStringField -> Wert per .add() statt direkter Zuweisung; die
 #    wuerde AttributeError 'Read-only!' aus Field.__set__ ausloesen).
@@ -81,14 +83,28 @@ def _betrag(objekt: Any, name: str, wert: Decimal) -> None:
     CurrencyField akzeptiert den Betrag direkt (drafthorse >= 2.2 setzt
     intern die Waehrung auf None). Nur falls eine sehr alte drafthorse-
     Version CurrencyField noch ein 2-Tupel verlangt, wird (wert, None)
-    gesetzt – ebenfalls ohne currencyID, denn EN 16931 (CII-DT-031)
-    verbietet das Attribut auf Betragsfeldern (Waehrung steht allein im
-    InvoiceCurrencyCode).
+    gesetzt – ebenfalls ohne currencyID: Auf allen Amount-Elementen
+    AUSSER TaxTotalAmount verbietet EN 16931 (CII-DT-031, fatal) das
+    Attribut; die Waehrung steht allein im InvoiceCurrencyCode.
     """
     try:
         setattr(objekt, name, wert)
     except TypeError:
         setattr(objekt, name, (wert, None))
+
+
+def _betrag_waehrung(objekt: Any, name: str, wert: Decimal, waehrung: str) -> None:
+    """Setzt ein Betragsfeld MIT currencyID-Attribut – nur TaxTotalAmount!
+
+    BR-CO-15 (EN 16931) erwartet ram:TaxTotalAmount mit currencyID
+    passend zum InvoiceCurrencyCode (ohne das Attribut greift die Regel
+    auf den Ausnahmefall 'keine USt' zurueck und schlaegt fehl).
+    CurrencyField schreibt das Attribut beim 2-Tupel (wert, waehrung).
+    """
+    try:
+        setattr(objekt, name, (wert, waehrung))
+    except TypeError:
+        setattr(objekt, name, wert)
 
 
 def _notizinhalt(note: IncludedNote, text: str) -> None:
@@ -276,7 +292,9 @@ def erzeuge_xml(
     _betrag(mon, "charge_total", Decimal("0"))
     _betrag(mon, "allowance_total", Decimal("0"))
     _betrag(mon, "tax_basis_total", summen["netto"])
-    _betrag(mon, "tax_total", summen["ust"])
+    # TaxTotalAmount (BT-110) als EINZIGES Amount-Element MIT currencyID
+    # (BR-CO-15); alle anderen Amounts bleiben attributlos (CII-DT-031).
+    _betrag_waehrung(mon, "tax_total", summen["ust"], WAehrUNG)
     _betrag(mon, "grand_total", summen["brutto"])
     _betrag(mon, "due_amount", summen["brutto"])
 

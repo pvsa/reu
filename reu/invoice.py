@@ -62,12 +62,56 @@ def _styles() -> dict[str, ParagraphStyle]:
     }
 
 
+_ADRESSE_MAX_ZEICHEN = 35
+
+
+def _umbruch(text: str, max_len: int = _ADRESSE_MAX_ZEICHEN) -> list[str]:
+    """Bricht einen Text bei max. max_len Zeichen um.
+
+    Wortweise umbrechen (keine halben Wörter, wenn vermeidbar);
+    einzelne Wörter, die selbst laenger als max_len sind, werden hart
+    gebrochen. Leerzeichen am Zeilenanfang/-ende entstehen dadurch nicht.
+    """
+    worte = str(text).split()
+    if not worte:
+        return [""]
+    zeilen: list[str] = []
+    aktuell = ""
+    for wort in worte:
+        if len(wort) > max_len:
+            # überlanges Einzelwort: vorherige Zeile abschließen, hart brechen
+            if aktuell:
+                zeilen.append(aktuell)
+                aktuell = ""
+            while len(wort) > max_len:
+                zeilen.append(wort[:max_len])
+                wort = wort[max_len:]
+            aktuell = wort
+            continue
+        kandidat = wort if not aktuell else f"{aktuell} {wort}"
+        if len(kandidat) <= max_len:
+            aktuell = kandidat
+        else:
+            zeilen.append(aktuell)
+            aktuell = wort
+    if aktuell:
+        zeilen.append(aktuell)
+    return zeilen
+
+
 def _adresse_kunde(k: Kunde) -> str:
-    zeilen = [k.name]
+    """Empfängeradresse – jede Zeile bei max. 35 Zeichen umbrochen.
+
+    35 Zeichen ist das in EN 16931 / Peppol uebliche Limit fuer
+    Adressfelder (z.B. BT-44 Buyer name); so bleibt das Adressfeld
+    auch fuer Fensterbriefumschlaege und Adressfenster lesbar.
+    """
+    roh = [k.name]
     if k.strasse:
-        zeilen.append(k.strasse)
-    zeilen.append(f"{k.plz} {k.ort}")
-    zeilen.append(k.land)
+        roh.append(k.strasse)
+    roh.append(f"{k.plz} {k.ort}")
+    roh.append(k.land)
+    zeilen = [z for teil in roh for z in _umbruch(teil)]
     return "<br/>".join(zeilen)
 
 

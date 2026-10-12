@@ -44,6 +44,7 @@ nicht erneut abgerechnet und nicht als 'nicht freigegeben' angemeckert.
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -65,17 +66,20 @@ class AuslagenError(Exception):
 
 
 def _belegnr_text(wert: object) -> str:
-    """Beleg-Nr. als Text – ohne '.0'-Anhang numerischer ODS-Zellen.
+    """Beleg-Nr. als Text – ohne '.0'-Anhang numerischer Werte.
 
-    LibreOffice speichert rein numerische Belegnummern als Zahl; der
-    ODS-Reader liefert dann float (z.B. 1302003929154.0) und str()
-    haengt '.0' an. Ganzzahlige Werte werden ohne Anhang formatiert,
-    alles andere (echte Textbelegnummern wie 'B-2026-0815',
-    Dezimalwerte) unverändert uebernommen.
+    Rein numerische Belegnummern liegen je nach ODS-Zelltyp als float
+    (z.B. 1302003929154.0) oder als String '1302003929154.0' vor
+    (Textformat '@' mit Zahl, Fremd-Import). Beide Formen werden
+    auf die Ziffern reduziert; echte Textbelegnummern wie
+    'B-2026-0815' und Dezimalwerte bleiben unverändert.
     """
     if isinstance(wert, float) and wert.is_integer():
         return str(int(wert))
-    return str(wert or "").strip()
+    text = str(wert or "").strip()
+    if re.fullmatch(r"\d+\.0+", text):
+        return text.split(".", 1)[0]
+    return text
 
 
 def _waehrung_aus_zelle(wert: object) -> str:

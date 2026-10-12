@@ -140,8 +140,27 @@ ergänzt. Datum als ODS-Datumzelle, `TT.MM.JJJJ` oder `JJJJ-MM-TT`
 
 **Blatt 'Auslagen'** (eine Zeile pro Beleg):
 
-| datum | kunde | art | bezeichnung | betrag_netto | belegnr | freigabe |
-|-------|-------|-----|-------------|--------------|---------|----------|
+| datum | kunde | art | bezeichnung | betrag_netto | belegnr | freigabe | währung |
+|-------|-------|-----|-------------|--------------|---------|----------|---------|
+
+**Währung (optional):** Ist in irgendeiner freigegebenen Zeile eine
+Währung angegeben (`währung`, `waehrung` oder `currency`; `€` gilt als
+EUR), führt die Rechnung diese Währung – für Beträge im PDF, das
+ZUGFeRD-XML (BT-5) und die Steuerwährung. Fehlt die Spalte ganz oder
+ist die Zelle leer: **EUR** (Anzeige `€`). Widersprüchliche Währungen
+in einer Rechnung sind ein Fehler (eine Rechnung darf nur eine Währung
+führen).
+
+**Beleg-Nr. als Text formatieren:** Die Spalte `belegnr` ist im
+Template `tools/neue_auslagen.py` als **Textzelle (Format `@`)** mit
+Beispielwert `1302003929154` hinterlegt. Bitte neue Belegnummern
+ebenso als Text erfassen – sonst speichert LibreOffice rein numerische
+Nummern als **Zahl**, und es hängt sich ein `.0` an (z.B.
+`1302003929154.0`). REU normalisiert beide Formen (Zahl und
+verunglückter Text wie `1302003929154.0`) zwar automatisch, mit
+Text-Format ist die Datei aber sauber. Bestehende Datei in
+LibreOffice: Beleg-Nr.-Spalte markieren → Format → Zellen → Text
+(Formatcode `@`).
 
 Pflichtspalten konfigurierbar (pflichtspalten); Standard wie oben (ohne
 freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (immer 19 %).

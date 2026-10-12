@@ -76,10 +76,15 @@ def _speichere_state(state: State, pfad: Path) -> None:
     )
 
 
-def naechste_renr(state: State, jahr: int, *, dry_run: bool) -> str:
+def naechste_renr(state: State, jahr: int, *, dry_run: bool, start: int = 1) -> str:
     """Erzeugt nächste Re-Nr 'YYYY-NNN' oder ENTWURF bei dry_run.
 
     dry_run: verwendet ENTWURF-YYYY-MM-DD-HHMMSS, schreibt nichts.
+    start: konfigurierbarer Startwert der laufenden Nummer je Jahr
+    ([erechnung] re_nr_start_<jahr>, z.B. 47 -> '2026-047'), für
+    mitten im Jahr übernommene Nummernfolgen. Der Zähler im State
+    gewinnt, wenn er schon weiter ist – die Nummer darf niemals
+    zurück- oder doppelt vergeben werden.
     """
     if dry_run:
         jetzt = _dt.datetime.now().strftime("%Y-%m-%d-%H%M%S")
@@ -87,6 +92,8 @@ def naechste_renr(state: State, jahr: int, *, dry_run: bool) -> str:
     if state.jahr != jahr:
         state.jahr = jahr
         state.laufende_nummer = 0
+    if start > 1:
+        state.laufende_nummer = max(state.laufende_nummer, start - 1)
     state.laufende_nummer += 1
     renr = f"{jahr}-{state.laufende_nummer:03d}"
     state.letzte_rechnungsnummer = renr

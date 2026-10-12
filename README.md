@@ -86,6 +86,12 @@ Sektionen: [ical], [smtp], [pdf], [leistender], [erechnung], [kunden],
 - **[erechnung] zahlungsziel_tage ist optional** – nur ein Fallback für
   Kunden OHNE Zahlungsziel-Spalte in der kunden.ods; leer/nicht gesetzt =
   kein Zahlungsziel (siehe Kunden-ODS).
+- **[erechnung] re_nr_start_<jahr> ist optional** – Startwert der laufenden
+  Re-Nummer für ein Jahr, z.B. `re_nr_start_2026 = 47` → erste Re-Nr des
+  Jahres ist `2026-047` (für mitten im Jahr übernommene Nummernfolgen).
+  Jahre ohne Eintrag starten bei `001`. Der Zähler im State gewinnt, wenn
+  er schon weiter ist (Nummern werden nie zurück- oder doppelt vergeben);
+  ein Wechsel des Eintrags zieht daher nur nach oben.
 
 Die [kunden:*]-Sektionen gibt es nicht mehr – die Kundendaten liegen in der
 ODS-Datei, deren Pfad in [kunden] datei steht (pro User:

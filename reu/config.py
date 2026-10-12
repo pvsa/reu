@@ -13,9 +13,13 @@ from __future__ import annotations
 
 import configparser
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+# [erechnung] re_nr_start_<jahr>: Startwert der laufenden Nummer je Jahr
+_RE_NR_START = re.compile(r"^re_nr_start_(\d{4})$", re.IGNORECASE)
 
 
 class ConfigError(Exception):
@@ -42,6 +46,9 @@ class ERechnung:
     profil: str = "ZUGFeRD"
     format: str = "pdfa3"
     zahlungsziel_tage: int | None = None
+    # Startwert der laufenden Re-Nr-Nummer je Jahr (z.B. {2026: 47} ->
+    # erste Re-Nr 2026-047); Jahre ohne Eintrag starten bei 001.
+    re_nr_start: dict[int, int] = field(default_factory=dict)
     iban: str = ""
     bic: str = ""
     bank: str = ""
@@ -142,10 +149,24 @@ def lade_config(user: str, *, basis: Path | None = None) -> Config:
     # kein 'Zahlbar bis' im PDF-Fuß). Die Spalte 'zahlungsziel_tage'
     # der kunden.ods hat Vorrang (leere Zelle dort = ebenfalls keins).
     zz_roh = _get(parser, "erechnung", "zahlungsziel_tage", fallback="").strip()
+    # Re-Nr-Start je Jahr: [erechnung] re_nr_start_<jahr> = N (erste Re-Nr
+    # des Jahres YYYY-0N). Für mitten im Jahr begonnene Nummernfolgen.
+    re_nr_start: dict[int, int] = {}
+    for opt in parser.options("erechnung"):
+        m = _RE_NR_START.match(opt.strip())
+        if not m:
+            continue
+        wert = int(_get(parser, "erechnung", opt))
+        if wert < 1:
+            raise ConfigError(
+                f"[erechnung] {opt} muss >= 1 sein (gefunden: {wert})"
+            )
+        re_nr_start[int(m.group(1))] = wert
     erechnung = ERechnung(
         profil=_get(parser, "erechnung", "profil", fallback="ZUGFeRD"),
         format=_get(parser, "erechnung", "format", fallback="pdfa3"),
         zahlungsziel_tage=int(zz_roh) if zz_roh else None,
+        re_nr_start=re_nr_start,
         iban=_get(parser, "erechnung", "iban", fallback=""),
         bic=_get(parser, "erechnung", "bic", fallback=""),
         bank=_get(parser, "erechnung", "bank", fallback=""),

@@ -179,7 +179,10 @@ def _erzeuge_rechnung(
     # Im Dry-Run wird trotzdem das ZUGFeRD-XML eingebettet, wenn freigegeben,
     # damit die PDF inkl. XML geprüft werden kann – aber mit ENTWURF-Re-Nr.
     entwurf = not freigegeben
-    renr = state_mod.naechste_renr(state, zeitraum.jahr, dry_run=dry_run)
+    renr = state_mod.naechste_renr(
+        state, zeitraum.jahr, dry_run=dry_run,
+        start=cfg.erechnung.re_nr_start.get(zeitraum.jahr, 1),
+    )
 
     out_verz = _ausgabe_verzeichnis(cfg, dry_run)
     basis_name = f"{kunde.kunde}_Rechnung_{renr}.pdf"

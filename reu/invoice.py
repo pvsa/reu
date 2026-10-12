@@ -28,6 +28,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
 from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
@@ -270,43 +271,62 @@ def _stunden_anlage(stunden: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitr
     return story
 
 
-def _belegnr_zelle(belegnr: object, style) -> Any:
-    """Beleg-Nr. als Zelle – lange Nummern zwei zeilig umbrechen.
+def _auslagen_breite(texte: list[str], groesse: int = 9) -> float:
+    """Minimal noetige Spaltenbreite (pt) fuer EINZEILIGEN Zellinhalt.
 
-    Belegnummern (z.B. 13-stellige Lieferanten-Rechnungsnummern) sind
-    breiter als die schmale Beleg-Nr.-Spalte der Auslagen-Anlage und
-    laufen sonst in die Nachbarspalte. Ab 13 Zeichen wird die Nummer
-    mittig in zwei Zeilen gebrochen (Paragraph mit <br/>).
+    Breitester Text ueber Kopfzeile (Helvetica-Bold) und Inhalt
+    (Helvetica) plus 12 pt Zellenabstand (6 pt links/rechts, wie in
+    der Tabelle gesetzt) und 2 pt Puffer: So ist die Spalte so schmal
+    wie noetig, ohne Umbruch oder Ueberlauf in die Nachbarspalte.
     """
-    text = str(belegnr or "").strip()
-    if not text or len(text) <= 12:
-        return text
-    mitte = (len(text) + 1) // 2
-    return Paragraph(escape(text[:mitte]) + "<br/>" + escape(text[mitte:]), style)
+    breit = max(
+        max((pdfmetrics.stringWidth(str(t), font, groesse) for t in texte), default=0.0)
+        for font in ("Helvetica", "Helvetica-Bold")
+    )
+    return breit + 12 + 2
 
 
 def _auslagen_anlage(auslagen: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitraum) -> list:
-    """Auslagentabelle als Anlage-Seite."""
+    """Auslagentabelle als Anlage-Seite.
+
+    Spalten: Datum, Art, Beleg-Nr. und Betrag einzeilig und so schmal
+    wie ihr breitester Inhalt (kein Umbruch – Belegnummern bleiben
+    unveraendert lesbar); einzig die Bezeichnung darf mehrzeilig
+    umbrechen (Paragraph) und bekommt die restliche Breite.
+    """
     styles = _styles()
     story: list = []
     story.append(Paragraph(f"Anlage: Auslagen {zeitraum.text}", styles["titel"]))
     story.append(Paragraph(f"Kunde: {kunde.name} ({kunde.kunde})", styles["normal"]))
     story.append(Spacer(1, 6 * mm))
+    total = sum((a["betrag_netto"] for a in auslagen), Decimal("0"))
     data = [["Datum", "Art", "Bezeichnung", "Beleg-Nr.", "Betrag"]]
-    total = Decimal("0")
     for a in auslagen:
         data.append(
             [
                 str(a["datum"]),
                 a["art"],
-                a["bezeichnung"],
-                _belegnr_zelle(a["belegnr"], styles["normal"]),
+                # Einzige mehrzeilige Spalte: Bezeichnung als Paragraph
+                Paragraph(escape(str(a["bezeichnung"])), styles["normal"]),
+                str(a["belegnr"]),
                 euro(a["betrag_netto"]),
             ]
         )
-        total += a["betrag_netto"]
     data.append(["Summe", "", "", "", euro(total)])
-    t = Table(data, colWidths=[24 * mm, 22 * mm, 85 * mm, 20 * mm, 24 * mm])
+    # Schmale Spalten am noetigen Minimum (eine Zeile, kein Umbruch);
+    # Bezeichnung als flexible Spalte bekommt den Rest der Satzbreite.
+    tabelle_breite = 170 * mm  # Satzspiegel A4 (wie Anlage Arbeitsstunden)
+    min_spalten = [
+        _auslagen_breite(["Datum"] + [str(a["datum"]) for a in auslagen] + ["Summe"]),
+        _auslagen_breite(["Art"] + [str(a["art"]) for a in auslagen]),
+        _auslagen_breite(["Beleg-Nr."] + [str(a["belegnr"]) for a in auslagen]),
+        _auslagen_breite(
+            ["Betrag"] + [euro(a["betrag_netto"]) for a in auslagen] + [euro(total)]
+        ),
+    ]
+    bezeichnung_breite = max(30 * mm, tabelle_breite - sum(min_spalten))
+    colWidths = [min_spalten[0], min_spalten[1], bezeichnung_breite, min_spalten[2], min_spalten[3]]
+    t = Table(data, colWidths=colWidths)
     t.setStyle(
         TableStyle(
             [

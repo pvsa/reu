@@ -229,8 +229,18 @@ def erzeuge_xml(
 
     document.trade.delivery.event.occurrence = zeitraum.ende_datum
 
+    # Rechnungswährung (BT-5): Angabe aus der Auslagen-ODS (Spalte
+    # 'währung', siehe expenses.lade_auslagen – Konsistenz ist dort
+    # geprüft), ohne Auslagen bzw. ohne Angabe: EUR.
+    waehrung = WAehrUNG
+    for a in auslagen:
+        w = str(a.get("währung", "")).strip().upper()
+        if w:
+            waehrung = w
+            break
+
     settlement = document.trade.settlement
-    settlement.currency_code = WAehrUNG
+    settlement.currency_code = waehrung
 
     tax = ApplicableTradeTax()
     _betrag(tax, "calculated_amount", summen["ust"])
@@ -293,8 +303,9 @@ def erzeuge_xml(
     _betrag(mon, "allowance_total", Decimal("0"))
     _betrag(mon, "tax_basis_total", summen["netto"])
     # TaxTotalAmount (BT-110) als EINZIGES Amount-Element MIT currencyID
-    # (BR-CO-15); alle anderen Amounts bleiben attributlos (CII-DT-031).
-    _betrag_waehrung(mon, "tax_total", summen["ust"], WAehrUNG)
+    # (BR-CO-15), passend zur Rechnungswährung BT-5; alle anderen
+    # Amounts bleiben attributlos (CII-DT-031).
+    _betrag_waehrung(mon, "tax_total", summen["ust"], waehrung)
     _betrag(mon, "grand_total", summen["brutto"])
     _betrag(mon, "due_amount", summen["brutto"])
 

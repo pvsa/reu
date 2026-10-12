@@ -286,6 +286,17 @@ def _auslagen_breite(texte: list[str], groesse: int = 9) -> float:
     return breit + 12 + 2
 
 
+def _waehrung_anzeige(waehrung: object) -> str:
+    """Währung für die Anzeige: EUR als €-Symbol, sonst ISO-Code."""
+    code = str(waehrung or "").strip().upper()
+    return "€" if code == "EUR" else code
+
+
+def _auslagen_betrag(wert: Decimal, waehrung: object) -> str:
+    """Betrag mit Währungsangabe: '1.272,78 €' bzw. '1.272,78 USD'."""
+    return f"{euro(wert)} {_waehrung_anzeige(waehrung)}"
+
+
 def _auslagen_anlage(auslagen: list[dict[str, Any]], kunde: Kunde, zeitraum: Zeitraum) -> list:
     """Auslagentabelle als Anlage-Seite.
 
@@ -293,6 +304,8 @@ def _auslagen_anlage(auslagen: list[dict[str, Any]], kunde: Kunde, zeitraum: Zei
     wie ihr breitester Inhalt (kein Umbruch – Belegnummern bleiben
     unveraendert lesbar); einzig die Bezeichnung darf mehrzeilig
     umbrechen (Paragraph) und bekommt die restliche Breite.
+    Beträge erscheinen mit der Währung aus der Auslagen-ODS
+    (Spalte 'währung', fehlt sie: €).
     """
     styles = _styles()
     story: list = []
@@ -300,6 +313,8 @@ def _auslagen_anlage(auslagen: list[dict[str, Any]], kunde: Kunde, zeitraum: Zei
     story.append(Paragraph(f"Kunde: {kunde.name} ({kunde.kunde})", styles["normal"]))
     story.append(Spacer(1, 6 * mm))
     total = sum((a["betrag_netto"] for a in auslagen), Decimal("0"))
+    betraege = [_auslagen_betrag(a["betrag_netto"], a.get("währung")) for a in auslagen]
+    betraege.append(_auslagen_betrag(total, auslagen[0].get("währung") if auslagen else "EUR"))
     data = [["Datum", "Art", "Bezeichnung", "Beleg-Nr.", "Betrag"]]
     for a in auslagen:
         data.append(
@@ -309,10 +324,10 @@ def _auslagen_anlage(auslagen: list[dict[str, Any]], kunde: Kunde, zeitraum: Zei
                 # Einzige mehrzeilige Spalte: Bezeichnung als Paragraph
                 Paragraph(escape(str(a["bezeichnung"])), styles["normal"]),
                 str(a["belegnr"]),
-                euro(a["betrag_netto"]),
+                _auslagen_betrag(a["betrag_netto"], a.get("währung")),
             ]
         )
-    data.append(["Summe", "", "", "", euro(total)])
+    data.append(["Summe", "", "", "", betraege[-1]])
     # Schmale Spalten am noetigen Minimum (eine Zeile, kein Umbruch);
     # Bezeichnung als flexible Spalte bekommt den Rest der Satzbreite.
     tabelle_breite = 170 * mm  # Satzspiegel A4 (wie Anlage Arbeitsstunden)
@@ -320,9 +335,7 @@ def _auslagen_anlage(auslagen: list[dict[str, Any]], kunde: Kunde, zeitraum: Zei
         _auslagen_breite(["Datum"] + [str(a["datum"]) for a in auslagen] + ["Summe"]),
         _auslagen_breite(["Art"] + [str(a["art"]) for a in auslagen]),
         _auslagen_breite(["Beleg-Nr."] + [str(a["belegnr"]) for a in auslagen]),
-        _auslagen_breite(
-            ["Betrag"] + [euro(a["betrag_netto"]) for a in auslagen] + [euro(total)]
-        ),
+        _auslagen_breite(["Betrag"] + betraege),
     ]
     bezeichnung_breite = max(30 * mm, tabelle_breite - sum(min_spalten))
     colWidths = [min_spalten[0], min_spalten[1], bezeichnung_breite, min_spalten[2], min_spalten[3]]

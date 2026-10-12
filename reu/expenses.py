@@ -24,7 +24,10 @@ Rückgabe von lade_auslagen:
     {
       "datei_vorhanden": bool,  # False: [auslagen] datei existiert nicht
       "freigegeben": bool,      # True, sobald IRGENDWO eine Zeile yes/ja hat
-      "auslagen": {kunde: [ {datum, art, bezeichnung, betrag_netto, belegnr} ]},
+      "waehrung": str,          # Rechnungswährung: Spalte 'währung' (oder
+                                # 'waehrung'/'currency') der Auslagen-ODS,
+                                # fehlt sie oder ist sie leer: 'EUR'
+      "auslagen": {kunde: [ {datum, art, bezeichnung, betrag_netto, belegnr, währung} ]},
       "nicht_freigegeben": [ {kunde, bezeichnung, belegnr} | {hinweis} ],
       "offene_zeilen": {kunde: anzahl},  # nicht freigegebene Zeilen je Kunde
       "erledigt": [ {kunde, bezeichnung, belegnr, vermerk} ],  # bereits abgerechnet (z.B. Re-Nr)
@@ -51,11 +54,42 @@ from .util import dezimal
 
 PFLICHTSPALTEN_DEFAULT = ["datum", "kunde", "art", "bezeichnung", "betrag_netto", "belegnr"]
 
+# Optionale Währungsspalte – beliebig benannt (Groß-/Kleinschreibung egal):
+_WAEHRUNG_SPALTEN = ("waehrung", "währung", "currency")
+
 _DATUM_FORMATE = ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y")
 
 
 class AuslagenError(Exception):
     pass
+
+
+def _belegnr_text(wert: object) -> str:
+    """Beleg-Nr. als Text – ohne '.0'-Anhang numerischer ODS-Zellen.
+
+    LibreOffice speichert rein numerische Belegnummern als Zahl; der
+    ODS-Reader liefert dann float (z.B. 1302003929154.0) und str()
+    haengt '.0' an. Ganzzahlige Werte werden ohne Anhang formatiert,
+    alles andere (echte Textbelegnummern wie 'B-2026-0815',
+    Dezimalwerte) unverändert uebernommen.
+    """
+    if isinstance(wert, float) and wert.is_integer():
+        return str(int(wert))
+    return str(wert or "").strip()
+
+
+def _waehrung_aus_zelle(wert: object) -> str:
+    """Währung aus Zelle als ISO-Code; leer bei unbesetzter Zelle.
+
+    '€'/'EUR'/'Euro' (Groß-/Kleinschreibung egal) -> 'EUR',
+    anderes ('USD', 'CHF', ...) als Grossbuchstaben-Code.
+    """
+    text = str(wert or "").strip()
+    if not text:
+        return ""
+    if text.lower() in {"€", "eur", "euro"}:
+        return "EUR"
+    return text.upper()
 
 
 def _als_datum(wert: object) -> _dt.date:
@@ -121,6 +155,7 @@ def lade_auslagen(conf: AuslagenConf, bekannte_kunden: set[str]) -> dict[str, An
     leer = {
         "datei_vorhanden": False,
         "freigegeben": False,
+        "waehrung": "EUR",
         "auslagen": {},
         "nicht_freigegeben": [],
         "offene_zeilen": {},
@@ -144,12 +179,22 @@ def lade_auslagen(conf: AuslagenConf, bekannte_kunden: set[str]) -> dict[str, An
     spalte = str(conf.freigabe_spalte).strip().lower()
     hat_spalte = bool(saetze) and spalte in saetze[0]
 
+    # Optionale Währungsspalte ermitteln ('Währung', 'waehrung', 'currency' –
+    # Header sind normalisiert, Groß-/Kleinschreibung egal)
+    waehrung_spalte = ""
+    if saetze:
+        for kandidat in _WAEHRUNG_SPALTEN:
+            if kandidat in saetze[0]:
+                waehrung_spalte = kandidat
+                break
+
     nicht_freigegeben: list[dict[str, Any]] = []
     offene_zeilen: dict[str, int] = {}
     erledigt: list[dict[str, Any]] = []
     gruppe: dict[str, list[dict[str, Any]]] = {}
     freigegeben = False
     zeilen_gesamt = 0
+    rechnungs_waehrung = ""
     for satz in saetze:
         if _leere_zeile(satz):
             continue
@@ -167,6 +212,19 @@ def lade_auslagen(conf: AuslagenConf, bekannte_kunden: set[str]) -> dict[str, An
                 f"Auslagenzeile für unbekannten Kunden '{kunde}' – "
                 f"in kunden.ods nicht definiert"
             )
+        # Währung der Zeile (optional); eine Rechnung führt nur EINE
+        # Währung – unterschiedliche Angaben sind ein Fehler.
+        zeilen_waehrung = _waehrung_aus_zelle(satz.get(waehrung_spalte)) if waehrung_spalte else ""
+        if zeilen_waehrung:
+            if not rechnungs_waehrung:
+                rechnungs_waehrung = zeilen_waehrung
+            elif zeilen_waehrung != rechnungs_waehrung:
+                raise AuslagenError(
+                    f"Widersprüchliche Währungen in {pfad}!{conf.blatt}: "
+                    f"'{rechnungs_waehrung}' und '{zeilen_waehrung}' "
+                    f"(Beleg {_belegnr_text(satz.get('belegnr'))}) – "
+                    "eine Rechnung darf nur eine Währung führen"
+                )
         roh_betrag = satz.get("betrag_netto")
         betrag = dezimal(roh_betrag)
         if (
@@ -192,7 +250,7 @@ def lade_auslagen(conf: AuslagenConf, bekannte_kunden: set[str]) -> dict[str, An
                 {
                     "kunde": kunde,
                     "bezeichnung": str(satz.get("bezeichnung", "")).strip(),
-                    "belegnr": str(satz.get("belegnr", "")).strip(),
+                    "belegnr": _belegnr_text(satz.get("belegnr")),
                     "vermerk": wert,
                 }
             )
@@ -202,7 +260,7 @@ def lade_auslagen(conf: AuslagenConf, bekannte_kunden: set[str]) -> dict[str, An
                 {
                     "kunde": kunde,
                     "bezeichnung": str(satz.get("bezeichnung", "")).strip(),
-                    "belegnr": str(satz.get("belegnr", "")).strip(),
+                    "belegnr": _belegnr_text(satz.get("belegnr")),
                 }
             )
             offene_zeilen[kunde] = offene_zeilen.get(kunde, 0) + 1
@@ -213,7 +271,8 @@ def lade_auslagen(conf: AuslagenConf, bekannte_kunden: set[str]) -> dict[str, An
                 "art": str(satz.get("art", "")).strip(),
                 "bezeichnung": str(satz.get("bezeichnung", "")).strip(),
                 "betrag_netto": betrag,
-                "belegnr": str(satz.get("belegnr", "")).strip(),
+                "belegnr": _belegnr_text(satz.get("belegnr")),
+                "währung": zeilen_waehrung or rechnungs_waehrung,
             }
         )
         freigegeben = True
@@ -227,9 +286,13 @@ def lade_auslagen(conf: AuslagenConf, bekannte_kunden: set[str]) -> dict[str, An
     # je Kunde nach Datum/Beleg sortieren
     for kunde in gruppe:
         gruppe[kunde].sort(key=lambda e: (e["datum"], e["belegnr"]))
+    # Rechnungswährung: Angabe aus der Auslagen-ODS, sonst EUR
+    if not rechnungs_waehrung:
+        rechnungs_waehrung = "EUR"
     return {
         "datei_vorhanden": True,
         "freigegeben": freigegeben,
+        "waehrung": rechnungs_waehrung,
         "auslagen": gruppe,
         "nicht_freigegeben": nicht_freigegeben,
         "offene_zeilen": offene_zeilen,

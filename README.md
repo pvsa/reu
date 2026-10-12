@@ -312,8 +312,8 @@ python3 -m pip install -U 'drafthorse>=2.2'
 
 [ical] url kann 'https://…', 'http://…' oder 'file://…' sein.
 Ein Termineintrag braucht ein Kundenkürzel im SUMMARY-Präfix: **exakt
-drei Zeichen, direkt gefolgt von einem Doppelpunkt** ('ZTR: …' – nicht
-'NOD25:' oder 'HA:'), oder ein Kürzel in der CATEGORIES-Eigenschaft.
+drei Zeichen, direkt gefolgt von einem Doppelpunkt** ('BBB: …' – nicht
+'AAAA:' oder 'CC:'), oder ein Kürzel in der CATEGORIES-Eigenschaft.
 Termine außerhalb des angefragten
 Zeitraums werden ignoriert. Termine **ohne** Kürzel (z.B. interne/
 technische Einträge wie Backups) gelten als nicht abrechenbar und werden

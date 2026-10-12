@@ -91,6 +91,9 @@ class SmtpConf:
 class KundenConf:
     datei: str
     blatt: str = "Kunden"
+    # Blatt mit der Rechnungsliste (Nummernkreis + Journal) – ersetzt die
+    # frühere conf/<user>.state.json. Leer/fehlt in der conf: 'Rechnungen'.
+    rechnungen_blatt: str = "Rechnungen"
 
 
 @dataclass
@@ -213,12 +216,17 @@ def lade_config(user: str, *, basis: Path | None = None) -> Config:
     kunden = KundenConf(
         datei=str((basis / kunden_datei) if not os.path.isabs(kunden_datei) else kunden_datei),
         blatt=_get(parser, "kunden", "blatt", fallback="Kunden"),
+        rechnungen_blatt=_get(parser, "kunden", "rechnungen_blatt", fallback="Rechnungen"),
     )
 
     logo_roh = _get(parser, "pdf", "logo_path", fallback="logo.jpg")
     logo_path = (basis / logo_roh) if not os.path.isabs(logo_roh) else Path(logo_roh)
 
     ausgabe_verz = basis / "out"
+    # Legacy: Die Rechnungsliste lebt jetzt im Blatt 'Rechnungen' der
+    # kunden.ods (cfg.kunden.rechnungen_blatt). Eine noch vorhandene
+    # state.json wird beim ersten echten Lauf einmalig importiert und
+    # in <user>.state.json.importiert umbenannt.
     state_pfad = basis / "conf" / f"{user}.state.json"
 
     return Config(

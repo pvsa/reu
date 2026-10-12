@@ -183,7 +183,6 @@ def _erzeuge_rechnung(
         state, zeitraum.jahr, dry_run=dry_run,
         start=cfg.erechnung.re_nr_start.get(zeitraum.jahr, 1),
     )
-
     out_verz = _ausgabe_verzeichnis(cfg, dry_run)
     basis_name = f"{kunde.kunde}_Rechnung_{renr}.pdf"
     pdf_pfad = out_verz / basis_name
@@ -237,7 +236,9 @@ def _erzeuge_rechnung(
         brutto=summen["brutto"],
         entwurf=entwurf,
         dry_run=dry_run,
-        pfad=cfg.state_pfad,
+        kunden_datei=cfg.kunden.datei,
+        blatt=cfg.kunden.rechnungen_blatt,
+        legacy_json=cfg.state_pfad,
     )
     return {"kunde": kunde.kunde, "renr": renr, "pdf": str(final_pdf), "summen": summen, "entwurf": entwurf}
 
@@ -314,7 +315,9 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
     # Im Dry-Run wird die ZUGFeRD-PDF trotzdem erzeugt (zum Prüfen);
     # Re-Nr/State/Versand steuert dry_run separat.
     freigegeben = auslagen_erg["freigegeben"]
-    state = state_mod.lade_state(cfg.state_pfad)
+    state = state_mod.lade_state(
+        cfg.kunden.datei, cfg.kunden.rechnungen_blatt, legacy_json=cfg.state_pfad
+    )
 
     kunden_keys = sorted(
         set(stunden_alle) | set(auslagen_erg["auslagen"]) | set(services_pos)
@@ -383,7 +386,10 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
                 print(f"FEHLER beim Markieren der Auslagen in {cfg.auslagen.datei}: {exc}")
 
     if dry_run:
-        print("\nDRY RUN — keine E-Mails versendet, keine Re-Nr vergeben, kein State geschrieben.")
+        print(
+            "\nDRY RUN — keine E-Mails versendet, keine Re-Nr vergeben, "
+            "Rechnungen-Liste unverändert."
+        )
     return 0
 
 
@@ -403,7 +409,9 @@ def cmd_full(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: str |
         return rc
     # Versand nur im echten Lauf
     kunden = _lade_kunden(cfg)
-    state = state_mod.lade_state(cfg.state_pfad)
+    state = state_mod.lade_state(
+        cfg.kunden.datei, cfg.kunden.rechnungen_blatt, legacy_json=cfg.state_pfad
+    )
     out_verz = _ausgabe_verzeichnis(cfg, dry_run=False)
     # Neueste Buchungen dieses Laufs versenden: anhand Re-Nr in State
     for b in state.buchungen:
@@ -441,10 +449,15 @@ def cmd_full(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: str |
 
 
 def cmd_journal(cfg: Config, year: int) -> int:
-    state = state_mod.lade_state(cfg.state_pfad)
+    state = state_mod.lade_state(
+        cfg.kunden.datei, cfg.kunden.rechnungen_blatt, legacy_json=cfg.state_pfad
+    )
     zeilen = state_mod.journal_zeilen(state)
     if not zeilen:
-        print(f"Keine Buchungen im State ({cfg.state_pfad}).")
+        print(
+            f"Keine Buchungen im Blatt '{cfg.kunden.rechnungen_blatt}' "
+            f"({cfg.kunden.datei})."
+        )
         return 0
     if year:
         zeilen = [z for z in zeilen if z["datum"].startswith(str(year))]
@@ -472,9 +485,13 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--expenses", action="store_true", help="Nur Auslagen aus ODS prüfen")
     g.add_argument("--invoice", action="store_true", help="Rechnung(en) erzeugen (kein Versand)")
     g.add_argument("--full", action="store_true", help="Rechnung + ZUGFeRD (finale); Versand nur mit --send")
-    g.add_argument("--journal", action="store_true", help="Rechnungsübersicht aus State")
+    g.add_argument(
+        "--journal", action="store_true",
+        help="Rechnungsübersicht aus dem Blatt 'Rechnungen' der kunden.ods",
+    )
     p.add_argument("--dry-run", action="store_true",
-                  help="kein Versand, keine Re-Nr, kein State (Ausgabe in out/dry-run/)")
+                  help="kein Versand, keine Re-Nr, Rechnungen-Liste "
+                       "unverändert (Ausgabe in out/dry-run/)")
     p.add_argument("--send", action="store_true",
                   help="finale Rechnungen nach dem Erzeugen per E-Mail versenden "
                        "([smtp]-Sektion); Standard: kein Versand")

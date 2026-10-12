@@ -147,23 +147,37 @@ def _lese_ods(pfad: Path) -> dict[str, list[list[Any]]]:
     return blaetter
 
 
+def lade_blatt_opt(datei: str | Path, blatt: str) -> list[list[Any]] | None:
+    """Wie lade_blatt, aber None statt OdsError, wenn das Blatt fehlt.
+
+    Wirft OdsError bei unlesbarer/ungültiger Datei (nicht aber, wenn
+    nur das genannte Blatt nicht existiert).
+    """
+    pfad = Path(datei)
+    if not pfad.is_file():
+        raise OdsError(f"ODS-Datei nicht gefunden: {pfad}")
+    workbook = _lese_ods(pfad)
+    if blatt in workbook:
+        return workbook[blatt]
+    # Groß-/Kleinschreibung des Blattnamens tolerieren ('services' == 'Services')
+    treffer = [n for n in workbook if n.lower() == blatt.lower()]
+    if treffer:
+        return workbook[treffer[0]]
+    return None
+
+
 def lade_blatt(datei: str | Path, blatt: str) -> list[list[Any]]:
     """Liefert die Roh-Zeilen des Blatts als Liste von Listen.
 
     Wirft OdsError, wenn Datei fehlt oder Blatt nicht existiert.
     """
     pfad = Path(datei)
-    if not pfad.is_file():
-        raise OdsError(f"ODS-Datei nicht gefunden: {pfad}")
-    workbook = _lese_ods(pfad)
-    if blatt not in workbook:
-        # Groß-/Kleinschreibung des Blattnamens tolerieren ('services' == 'Services')
-        treffer = [n for n in workbook if n.lower() == blatt.lower()]
-        if treffer:
-            return workbook[treffer[0]]
+    zeilen = lade_blatt_opt(pfad, blatt)
+    if zeilen is None:
+        workbook = _lese_ods(pfad)
         verfuegbar = ", ".join(sorted(workbook.keys())) or "(keine)"
         raise OdsError(f"Blatt '{blatt}' fehlt in {pfad}. Vorhanden: {verfuegbar}")
-    return workbook[blatt]
+    return zeilen
 
 
 def blatt_als_dicts(datei: str | Path, blatt: str) -> list[dict[str, Any]]:
@@ -348,6 +362,12 @@ def aendere_spalte(
     for praefix, uri in _XMLNS:
         Et.register_namespace(praefix, uri)
     neuer_content = Et.tostring(wurzel, encoding="UTF-8", xml_declaration=True)
+    _schreibe_content(pfad, neuer_content)
+    return geaendert
+
+
+def _schreibe_content(pfad: Path, neuer_content: bytes) -> None:
+    """Ersetzt content.xml atomar (temporäre Datei + replace)."""
     tmp = pfad.with_name(pfad.name + ".tmp")
     try:
         with zipfile.ZipFile(pfad) as alt, zipfile.ZipFile(tmp, "w") as neu:
@@ -360,4 +380,113 @@ def aendere_spalte(
     except OSError as exc:
         tmp.unlink(missing_ok=True)
         raise OdsError(f"ODS-Datei konnte nicht gespeichert werden: {pfad} ({exc})") from exc
-    return geaendert
+
+
+def _ist_fuellzeile(zeile: Et.Element) -> bool:
+    """LibreOffice-Füllzeile am Blattende (riesige number-rows-repeated)."""
+    wiederholt = zeile.get(_ROWS_REPEATED)
+    return bool(wiederholt) and int(wiederholt) > _MAX_LEER_WIEDERHOLUNG
+
+
+def _neue_zeile(werte: list[Any]) -> Et.Element:
+    """Baut eine table:table-row aus Werten (leer = leere Zelle)."""
+    zeile = Et.Element(_ROW)
+    for wert in werte:
+        zelle = Et.SubElement(zeile, _CELL)
+        text = "" if wert is None else str(wert)
+        if not text:
+            continue  # leere Zelle ohne value-type
+        zelle.set(_VALUE_TYPE, "string")
+        absatz = Et.SubElement(zelle, _TEXT_P)
+        absatz.text = text
+    return zeile
+
+
+def haenge_zeilen_an(
+    datei: str | Path,
+    blatt: str,
+    zeilen: list[list[Any]],
+    *,
+    kopf: list[str] | None = None,
+) -> int:
+    """Hängt Datenzeilen ans Blatt an; legt das Blatt nötigenfalls an.
+
+    Fehlt das Blatt, wird es hinter der letzten Tabelle angelegt –
+    mit optionaler Kopfzeile (kopf) und einer passenden
+    table:table-column-Definition. Existiert das Blatt, werden die
+    Zeilen hinter der letzten echten Datenzeile eingefügt (vor evtl.
+    LibreOffice-Füllzeilen mit riesiger number-rows-repeated, damit die
+    Daten nicht jenseits von Zeile 1048576 landen).
+
+    Werte werden als String-Zellen geschrieben (leer/None = leere
+    Zelle). Gibt die Anzahl angehängter Zeilen zurück; bei leeren
+    zeilen passiert nichts (0). Wirft OdsError bei Problemen.
+    """
+    if not zeilen:
+        return 0
+    pfad = Path(datei)
+    if not pfad.is_file():
+        raise OdsError(f"ODS-Datei nicht gefunden: {pfad}")
+    try:
+        with zipfile.ZipFile(pfad) as archiv:
+            content = archiv.read("content.xml")
+    except (zipfile.BadZipFile, KeyError) as exc:
+        raise OdsError(f"Keine gültige ODS-Datei: {pfad} ({exc})") from exc
+
+    try:
+        wurzel = Et.fromstring(content)
+    except Et.ParseError as exc:
+        raise OdsError(f"content.xml unlesbar in {pfad}: {exc}") from exc
+
+    tabelle = None
+    letzte_tabelle = None
+    for t in wurzel.iter(_TABLE):
+        letzte_tabelle = t
+        if (t.get(_NAME) or "").lower() == blatt.lower():
+            tabelle = t
+            break
+
+    if tabelle is None:
+        if letzte_tabelle is None:
+            raise OdsError(
+                f"Keine Tabelle in {pfad} – Blatt '{blatt}' kann nicht angelegt werden."
+            )
+        # Elter (office:spreadsheet) der letzten Tabelle suchen
+        spreadsheet = None
+        for el in wurzel.iter():
+            if letzte_tabelle in list(el):
+                spreadsheet = el
+                break
+        if spreadsheet is None:
+            raise OdsError(f"office:spreadsheet nicht gefunden in {pfad}.")
+        tabelle = Et.Element(_TABLE)
+        tabelle.set(_NAME, blatt)
+        spaltenzahl = max(
+            len(kopf) if kopf else 0,
+            max(len(z) for z in zeilen),
+        )
+        if spaltenzahl > 0:
+            spalte = Et.SubElement(tabelle, f"{{{_TABLE_NS}}}table-column")
+            if spaltenzahl > 1:
+                spalte.set(_COLS_REPEATED, str(spaltenzahl))
+        if kopf:
+            tabelle.append(_neue_zeile(list(kopf)))
+        for z in zeilen:
+            tabelle.append(_neue_zeile(list(z)))
+        kinder = list(spreadsheet)
+        spreadsheet.insert(kinder.index(letzte_tabelle) + 1, tabelle)
+    else:
+        # Einfügeposition: hinter der letzten echten Datenzeile
+        kinder = list(tabelle)
+        position = 0
+        for i, kind in enumerate(kinder):
+            if kind.tag == _ROW and not _ist_fuellzeile(kind):
+                position = i + 1
+        for offset, z in enumerate(zeilen):
+            tabelle.insert(position + offset, _neue_zeile(list(z)))
+
+    for praefix, uri in _XMLNS:
+        Et.register_namespace(praefix, uri)
+    neuer_content = Et.tostring(wurzel, encoding="UTF-8", xml_declaration=True)
+    _schreibe_content(pfad, neuer_content)
+    return len(zeilen)

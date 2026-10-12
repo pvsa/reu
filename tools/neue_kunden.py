@@ -3,8 +3,15 @@
 
 Blatt 'Kunden' mit dem Header
     kunde | name | strasse | plz | ort | land | ust_id | leitweg_id | stundensatz | zahlungsziel_tage
-und Blatt 'Services' mit dem Header
+Blatt 'Services' mit dem Header
     kunde | service | Kosten pro Stück [€] | 1 | 2 | … | 12
+und Blatt 'Rechnungen' mit dem Header
+    re_nr | datum | kunde | leistungszeitraum | netto | ust | brutto | status
+
+Das Blatt 'Rechnungen' ersetzt die frühere conf/<user>.state.json:
+REU trägt dort jede erzeugte Rechnung ein und leitet daraus den
+Nummernkreis ab (nächste Re-Nr = höchste Nummer des Jahres + 1);
+der Status ist pflegbar (offen -> bezahlt, --journal liest das Blatt).
 
 wie von den [kunden]/[services]-Erwartungen von REU gebraucht
 (Spaltentitel sind groß-/kleinschreibungsagnostisch).
@@ -34,6 +41,11 @@ from xml.sax.saxutils import escape
 KOPF = [
     "kunde", "name", "strasse", "plz", "ort", "land",
     "ust_id", "leitweg_id", "stundensatz", "zahlungsziel_tage",
+]
+
+RECHNUNGEN_KOPF = [
+    "re_nr", "datum", "kunde", "leistungszeitraum",
+    "netto", "ust", "brutto", "status",
 ]
 
 BEISPIEL = [
@@ -99,6 +111,7 @@ def content_xml(zeilen: list, services_zeilen: list) -> str:
     tabellen = (
         _blatt("Kunden", KOPF, zeilen)
         + _blatt("Services", SERVICES_KOPF, services_zeilen)
+        + _blatt("Rechnungen", RECHNUNGEN_KOPF, [])
     )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -127,7 +140,7 @@ def schreibe_ods(pfad: Path, zeilen: list, services_zeilen: list) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Erzeugt conf/<user>-kunden.ods (Blätter 'Kunden' und 'Services')."
+        description="Erzeugt conf/<user>-kunden.ods (Blätter 'Kunden', 'Services' und 'Rechnungen')."
     )
     ap.add_argument("user", help="Benutzername, z. B. alice oder philipp")
     ap.add_argument(
@@ -149,7 +162,8 @@ def main() -> int:
     print(
         f"OK: {pfad} erzeugt (Blatt 'Kunden', {len(KOPF)} Spalten, "
         f"{len(zeilen)} Beispielzeile(n); Blatt 'Services', "
-        f"{len(SERVICES_KOPF)} Spalten, {len(services_zeilen)} Beispielzeile(n))."
+        f"{len(SERVICES_KOPF)} Spalten, {len(services_zeilen)} Beispielzeile(n); "
+        f"Blatt 'Rechnungen', {len(RECHNUNGEN_KOPF)} Spalten, leer)."
     )
     print("In conf/" + args.user + ".conf eintragen:")
     print("    [kunden]")

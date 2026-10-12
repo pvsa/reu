@@ -21,7 +21,7 @@ Faktur-X-XML (ZUGFeRD, Profil EN 16931). E-Mail-Versand per SMTP nur mit `--send
 
 Das CLI-Argument 'month' erlaubt drei Formen:
 
-| Argument | Bedeutung | Journal/State (iso) | Anzeige im PDF (text) |
+| Argument | Bedeutung | Journal/Rechnungen (iso) | Anzeige im PDF (text) |
 |----------|-----------|---------------------|------------------------|
 | 11       | Einzelmonat November | 2025-11 | 11/2025 |
 | 10-12    | Monatsbereich Okt–Dez | 2025-10-2025-12 | 10/2025-12/2025 |
@@ -59,16 +59,16 @@ reu/
 │   ├── invoice.py          # Stufe 3: Rechnungs-PDF (reportlab)
 │   ├── zugferd.py          # Stufe 4: drafthorse XML + PDF/A-3-Embedding
 │   ├── smtp.py             # Versand (no-op im Dry-Run)
-│   ├── state.py            # Re-Nr-Kreis + Journal (JSON)
+│   ├── state.py            # Re-Nr-Kreis + Journal (Blatt 'Rechnungen' der kunden.ods)
 │   └── util.py             # Hilfsfunktionen, Zeitraum-Parsing + Konstanten
 ├── conf/
 │   ├── alice.conf          # EINZIGE Beispiel-Config
 │   ├── alice-kunden.ods    # Beispiel-Kundenstammdaten (per tools/neue_kunden.py erzeugbar)
 │   ├── alice-auslagen.ods  # zentrale Auslagen-ODS (per tools/neue_auslagen.py erzeugbar)
-│   └── alice.state.json    # (wird beim finalen Lauf angelegt)
+│   └── <user>.state.json    # LEGACY: wird einmalig ins Blatt 'Rechnungen' importiert
 ├── tools/
 │   ├── neue_auslagen.py    # erzeugt conf/<user>-auslagen.ods
-│   └── neue_kunden.py      # erzeugt conf/<user>-kunden.ods (Kunden + Services)
+│   └── neue_kunden.py      # erzeugt conf/<user>-kunden.ods (Kunden + Services + Rechnungen)
 ├── out/
 │   ├── final/              # finale Rechnungen
 │   └── dry-run/            # Entwürfe / Dry-Run-Ausgaben
@@ -89,8 +89,8 @@ Sektionen: [ical], [smtp], [pdf], [leistender], [erechnung], [kunden],
 - **[erechnung] re_nr_start_<jahr> ist optional** – Startwert der laufenden
   Re-Nummer für ein Jahr, z.B. `re_nr_start_2026 = 47` → erste Re-Nr des
   Jahres ist `2026-047` (für mitten im Jahr übernommene Nummernfolgen).
-  Jahre ohne Eintrag starten bei `001`. Der Zähler im State gewinnt, wenn
-  er schon weiter ist (Nummern werden nie zurück- oder doppelt vergeben);
+  Jahre ohne Eintrag starten bei `001`. Die Rechnungsliste gewinnt, wenn
+  sie schon weiter ist (Nummern werden nie zurück- oder doppelt vergeben);
   ein Wechsel des Eintrags zieht daher nur nach oben.
 
 Die [kunden:*]-Sektionen gibt es nicht mehr – die Kundendaten liegen in der
@@ -198,7 +198,7 @@ freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (i
 
 - `yes` oder `ja` → Zeile wird abgerechnet (Groß-/Kleinschreibung egal).
 - leer/`no`/`nein` → Zeile wird **übersprungen** (Ausgabe: WARNUNG je Zeile).
-- Die Rechnung ist **finale** (echte Re-Nr, State, ZUGFeRD; Versand nur mit `--send`), sobald
+- Die Rechnung ist **finale** (echte Re-Nr, Eintrag ins Blatt 'Rechnungen', ZUGFeRD; Versand nur mit `--send`), sobald
   **mindestens eine** Zeile der Datei `yes`/`ja` hat – sonst ENTWURF.
 - Fehlt die Spalte komplett: keine Zeile freigegeben → ENTWURF + WARNUNG.
 
@@ -270,7 +270,7 @@ Rechnung, bis freigabe=yes/ja`. Kein Kunde verschwindet stillschweigend.
 # Nur Auslagen aus ODS prüfen
 ./run-reu.py alice 11 2025 --expenses
 
-# Rechnungsentwurf (keine Zeile mit freigabe=yes → ENTWURF, kein XML, kein Versand, kein State)
+# Rechnungsentwurf (keine Zeile mit freigabe=yes → ENTWURF, kein XML, kein Versand, keine Re-Nr)
 ./run-reu.py alice 11 2025 --invoice
 
 # QUARTALSABRECHNUNG: Oktober bis Dezember in einer Rechnung je Kunde
@@ -280,7 +280,7 @@ Rechnung, bis freigabe=yes/ja`. Kein Kunde verschwindet stillschweigend.
 ./run-reu.py alice 11-12 2025 --full
 
 # Rechnung zum Prüfen mit eingebettetem ZUGFeRD-XML, aber OHNE Versand
-# (freigabe=yes in mindestens einer Zeile vorausgesetzt). Re-Nr bleibt ENTWURF-…, kein State.
+# (freigabe=yes in mindestens einer Zeile vorausgesetzt). Re-Nr bleibt ENTWURF-…, Blatt 'Rechnungen' unverändert.
 ./run-reu.py alice Q1 2025 --full --dry-run
 
 # Finale Rechnung + ZUGFeRD + Journal, OHNE E-Mail-Versand (Standard!)
@@ -289,7 +289,7 @@ Rechnung, bis freigabe=yes/ja`. Kein Kunde verschwindet stillschweigend.
 # Finale Rechnung + ZUGFeRD + Journal + E-Mail-Versand (freigabe=yes vorausgesetzt)
 ./run-reu.py alice 11 2025 --full --send
 
-# Rechnungsübersicht aus State (fürs Finanzamt)
+# Rechnungsübersicht aus dem Blatt 'Rechnungen' der kunden.ods (fürs Finanzamt)
 ./run-reu.py alice --journal --journal-year 2025
 
 # Nur einen Kunden verarbeiten
@@ -305,20 +305,37 @@ wird nur die Hilfe ausgegeben – keine Ausführung.
 |--------|--------|-----------|
 | Rechnungs-PDF erzeugen | ✓ | ✓ |
 | ZUGFeRD-XML + PDF/A-3-Embedding (nur bei freigabe=yes) | ✓ | ✓ — damit PDF+XML prüfbar |
-| Re-Nr vergeben + State schreiben | ✓ | ✗ — verwendet ENTWURF-… |
+| Re-Nr vergeben + Rechnungen-Blatt schreiben | ✓ | ✗ — verwendet ENTWURF-… |
 | E-Mail-Versand | nur mit `--send` | ✗ — komplett übersprungen |
 | Ausgabe in | out/final/ | out/dry-run/ |
 
 Die Freigabe-Spalte und --dry-run sind orthogonal: freigabe steuert Entwurf-vs-finale-Logik
-(XML ja/nein), --dry-run steuert Seiteneffekte (Versand, State, Re-Nr). So kann
+(XML ja/nein), --dry-run steuert Seiteneffekte (Versand, Rechnungen-Blatt, Re-Nr). So kann
 auch bei versehentlich freigegebenen Zeilen nichts nach draußen gehen und
 keine Nummer verbraucht werden.
 
-## Rechnungsnummer
+## Rechnungsnummer und Rechnungsliste (Blatt 'Rechnungen')
 
-Aus conf/<user>.state.json, Format YYYY-NNN (fortlaufend pro Jahr),
-Jahreswechsel setzt den Kreis zurück. Bei Entwurf/Dry-Run:
-ENTWURF-YYYY-MM-DD-HHMMSS (nicht persistent).
+Nummernkreis und Journal werden im Blatt **Rechnungen** der
+conf/<user>-kunden.ods gepflegt (ersetzte die frühere
+conf/<user>.state.json). Schema (eine Zeile je Rechnung):
+
+```
+re_nr | datum | kunde | leistungszeitraum | netto | ust | brutto | status
+```
+
+- **Nummernkreis:** Format YYYY-NNN, fortlaufend pro Jahr; die nächste
+  Nummer ist die **höchste vorhandene Nummer des Jahres + 1** – der Kreis
+  wird aus der Liste abgeleitet und kann nie zurück- oder doppelt
+  vergeben werden. Jahreswechsel setzt den Kreis zurück.
+- **Pflegen:** Die Liste ist direkt editierbar – z.B. Status `offen` →
+  `bezahlt` setzen; `--journal` liest das Blatt (Zusatzspalten bleiben
+  unberührt, neue Zeilen bekommen dort leere Zellen). Fehlt das Blatt,
+  legt REU es beim ersten echten Lauf an (Kopfzeile inklusive).
+- **Migration:** Existiert noch eine conf/<user>.state.json, wird sie
+  beim ersten echten Lauf einmalig importiert und in
+  <user>.state.json.importiert umbenannt (Dry-Run lässt sie liegen).
+- **Entwurf/Dry-Run:** ENTWURF-YYYY-MM-DD-HHMMSS (nicht persistent).
 
 ## Abhängigkeiten
 

@@ -17,8 +17,11 @@ conf/*
 !conf/alice-kunden.ods
 !conf/auslagen_2025-11.ods
 
-# Persistenter State (pro User, nicht einchecken) – zusätzlich zu conf/*
+# LEGACY-Persistenter State (pro User, nicht einchecken) – zusätzlich zu conf/*;
+# Rechnungsliste lebt jetzt im Blatt 'Rechnungen' der <user>-kunden.ods,
+# eine alte state.json wird einmalig dorthin importiert (*.importiert).
 conf/*.state.json
+conf/*.state.json.importiert
 
 # Logo: lokales pilarkto.net-Logo, nicht für das öffentliche Repo
 logo.jpg

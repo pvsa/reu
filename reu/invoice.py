@@ -368,7 +368,7 @@ def erzeuge_rechnung_pdf(
     zeitraum: Zeitraum,
     renr: str,
     re_datum: _dt.date,
-    faelligkeit: _dt.date,
+    faelligkeit: _dt.date | None,
     entwurf: bool,
     freigegeben: bool,
     ausgabe_pfad: Path,
@@ -483,8 +483,12 @@ def erzeuge_rechnung_pdf(
     story.append(Spacer(1, 8 * mm))
 
     # Fuß
-    fuss_text = (
-        f"Zahlungsziel: bis {faelligkeit.isoformat()}.<br/>"
+    # Fuß – Zahlungsziel nur, wenn spezifiziert (leere Angabe = offen,
+    # keine Fälligkeit auf der Rechnung)
+    fuss_text = ""
+    if faelligkeit is not None:
+        fuss_text += f"Zahlungsziel: bis {faelligkeit.isoformat()}.<br/>"
+    fuss_text += (
         f"IBAN: {cfg.erechnung.iban}<br/>"
         f"BIC: {cfg.erechnung.bic}<br/>"
         f"Bank: {cfg.erechnung.bank}<br/>"

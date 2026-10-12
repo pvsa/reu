@@ -39,7 +39,9 @@ Bei Mehrmonats-Zeiträumen gilt:
   Auslagenlage hin (Zeilen gesamt, abgerechnet, übersprungen).
   Freigabe zeilenweise über die Spalte `freigabe` (siehe unten).
 - **Rechnungsdatum** = letzter Tag des letzten Monats des Zeitraums,
-  Zahlungsziel ab diesem Datum.
+  Fälligkeit (Zahlungsziel) je Kunde: Spalte `zahlungsziel_tage` der
+  kunden.ods (leer = **kein** Zahlungsziel), sonst
+  `[erechnung] zahlungsziel_tage` – nirgends angegeben = offen.
 
 ## Modulstruktur
 
@@ -61,11 +63,12 @@ reu/
 │   └── util.py             # Hilfsfunktionen, Zeitraum-Parsing + Konstanten
 ├── conf/
 │   ├── alice.conf          # EINZIGE Beispiel-Config
-│   ├── alice-kunden.ods    # Beispiel-Kundenstammdaten
+│   ├── alice-kunden.ods    # Beispiel-Kundenstammdaten (per tools/neue_kunden.py erzeugbar)
 │   ├── alice-auslagen.ods  # zentrale Auslagen-ODS (per tools/neue_auslagen.py erzeugbar)
 │   └── alice.state.json    # (wird beim finalen Lauf angelegt)
 ├── tools/
-│   └── neue_auslagen.py    # erzeugt conf/<user>-auslagen.ods
+│   ├── neue_auslagen.py    # erzeugt conf/<user>-auslagen.ods
+│   └── neue_kunden.py      # erzeugt conf/<user>-kunden.ods (Kunden + Services)
 ├── out/
 │   ├── final/              # finale Rechnungen
 │   └── dry-run/            # Entwürfe / Dry-Run-Ausgaben
@@ -80,6 +83,9 @@ Sektionen: [ical], [smtp], [pdf], [leistender], [erechnung], [kunden],
 - **[smtp] smtp_username / smtp_password sind optional** – nur setzen, wenn
   der SMTP-Server eine Authentifizierung verlangt (ohne = Relay ohne Login).
 - **[leistender]** führt keine Steuernummer mehr, nur ust_id.
+- **[erechnung] zahlungsziel_tage ist optional** – nur ein Fallback für
+  Kunden OHNE Zahlungsziel-Spalte in der kunden.ods; leer/nicht gesetzt =
+  kein Zahlungsziel (siehe Kunden-ODS).
 
 Die [kunden:*]-Sektionen gibt es nicht mehr – die Kundendaten liegen in der
 ODS-Datei, deren Pfad in [kunden] datei steht (pro User:
@@ -89,8 +95,13 @@ conf/<user>-kunden.ods).
 
 Ein Blatt 'Kunden', eine Zeile je Kunde:
 
-| kunde | name | strasse | plz | ort | land | ust_id | leitweg_id | stundensatz |
-|-------|------|---------|-----|-----|------|--------|-----------|-------------|
+| kunde | name | strasse | plz | ort | land | ust_id | leitweg_id | stundensatz | zahlungsziel_tage |
+|-------|------|---------|-----|-----|------|--------|-----------|-------------|-------------------|
+
+**Anlegen:** `python3 tools/neue_kunden.py <user>
+[--beispiel]` erzeugt die Datei mit korrektem Header (Blätter 'Kunden'
+und 'Services'; Abbruch, wenn sie bereits existiert; `--force`
+überschreibt).
 
 Pflicht: kunde, name, plz, ort, land, stundensatz.
 Optional: strasse, leitweg_id (B2B optional, B2G Pflicht) und **ust_id**.
@@ -99,6 +110,15 @@ ZUGFeRD-XML (TaxRegistration VA) ausgewiesen.
 'stundensatz' als DE-Dezimal '95,00' oder EN '95.00'. **'0,00' ist erlaubt**
 (Kunde ohne Honorar, z.B. nur Auslagen/Services; Stunden erscheinen dann mit
 0,00 € auf der Rechnung). Negativ ist unzulässig.
+
+**Zahlungsziel (optional), Spalte `zahlungsziel_tage`** (Spaltentitel
+groß-/kleinschreibungsagnostisch, Varianten wie 'Zahlungsziel' werden
+erkannt): Anzahl Tage ab Rechnungsdatum, z.B. `21`.
+**Leere Zelle = kein Zahlungsziel** – die Rechnung spezifiziert dann
+bewusst KEINE Fälligkeit (kein 'Zahlbar bis' im PDF-Fuß, kein BT-9 im
+ZUGFeRD-XML). Fehlt die Spalte komplett, greift
+`[erechnung] zahlungsziel_tage` aus der conf (dort leer = ebenfalls
+kein Zahlungsziel). Die kunden.ods-Spalte hat also Vorrang.
 
 **Blatt 'Services' (optional, eine Zeile je Kunde und Service):**
 

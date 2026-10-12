@@ -66,5 +66,10 @@ def sende_rechnung(
                 if conf.smtp_username:
                     server.login(conf.smtp_username, conf.smtp_password or "")
                 server.send_message(msg)
-    except smtplib.SMTPException as exc:  # noqa: BLE001
-        raise SmtpError(f"SMTP-Versand fehlgeschlagen: {exc}") from exc
+    except (smtplib.SMTPException, OSError) as exc:  # noqa: BLE001
+        # OSError deckt DNS-/Verbindungsfehler ab (z.B. [Errno -2]
+        # 'Name or service not known'), sonst bricht der Lauf hart ab.
+        raise SmtpError(
+            f"SMTP-Versand fehlgeschlagen (Server {conf.server!r}, "
+            f"Port {conf.port}): {exc}"
+        ) from exc

@@ -165,7 +165,15 @@ def _erzeuge_rechnung(
 ) -> dict:
     # Rechnungsdatum = letzter Tag des letzten Monats des Zeitraums
     re_datum = letzter_des_monats(zeitraum.jahr, zeitraum.letzter_monat)
-    faelligkeit = re_datum + _dt.timedelta(days=cfg.erechnung.zahlungsziel_tage)
+    # Zahlungsziel: kunden.ods-Spalte 'zahlungsziel_tage' hat Vorrang
+    # (leere Zelle dort = kein Zahlungsziel); fehlt die Spalte komplett:
+    # [erechnung] zahlungsziel_tage (leer = ebenfalls keins). None =
+    # Fälligkeit nicht spezifiziert (kein BT-9, kein PDF-Fuß-Hinweis).
+    if kunde.zahlungsziel_spalte:
+        faelligkeit = kunde.faelligkeit(re_datum)
+    else:
+        tage = cfg.erechnung.zahlungsziel_tage
+        faelligkeit = re_datum + _dt.timedelta(days=tage) if tage else None
     # entwurf = keine finale Rechnung (kein XML im PDF-Hinweis, keine echte Re-Nr).
     # Im Dry-Run wird trotzdem das ZUGFeRD-XML eingebettet, wenn freigegeben,
     # damit die PDF inkl. XML geprüft werden kann – aber mit ENTWURF-Re-Nr.

@@ -190,7 +190,7 @@ def erzeuge_xml(
     summen: dict[str, Decimal],
     renr: str,
     re_datum: _dt.date,
-    faelligkeit: _dt.date,
+    faelligkeit: _dt.date | None,
     zeitraum: Zeitraum,
 ) -> bytes:
     """Erzeugt validiertes Faktur-X XML (EN 16931)."""
@@ -250,10 +250,13 @@ def erzeuge_xml(
     tax.rate_applicable_percent = UST_PROZENT
     settlement.trade_tax.add(tax)
 
-    terms = PaymentTerms()
-    terms.description = f"Zahlbar bis {faelligkeit.isoformat()}"
-    terms.due = faelligkeit
-    settlement.terms.add(terms)
+    # BT-9/BT-20 nur bei spezifiziertem Zahlungsziel: leere Angabe =
+    # offen, die Rechnung führt keine Fälligkeit.
+    if faelligkeit is not None:
+        terms = PaymentTerms()
+        terms.description = f"Zahlbar bis {faelligkeit.isoformat()}"
+        terms.due = faelligkeit
+        settlement.terms.add(terms)
 
     _payment_means_hinzufuegen(settlement, cfg)
 
@@ -336,7 +339,7 @@ def erzeuge_zugferd_pdf(
     summen: dict[str, Decimal],
     renr: str,
     re_datum: _dt.date,
-    faelligkeit: _dt.date,
+    faelligkeit: _dt.date | None,
     zeitraum: Zeitraum,
 ) -> Path:
     """Erzeugt XML + PDF/A-3 und schreibt die finale ZUGFeRD-PDF."""

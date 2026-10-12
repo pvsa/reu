@@ -293,6 +293,12 @@ def lade_auslagen(conf: AuslagenConf, bekannte_kunden: set[str]) -> dict[str, An
     # Rechnungswährung: Angabe aus der Auslagen-ODS, sonst EUR
     if not rechnungs_waehrung:
         rechnungs_waehrung = "EUR"
+    # Zeilen ohne eigene Währungsangabe (leere Zelle/fehlende Spalte) führen
+    # die Rechnungswährung – sonst wären ihre Beträge in der Anlage ohne Symbol.
+    for kunde in gruppe:
+        for eintrag in gruppe[kunde]:
+            if not eintrag.get("währung"):
+                eintrag["währung"] = rechnungs_waehrung
     return {
         "datei_vorhanden": True,
         "freigegeben": freigegeben,

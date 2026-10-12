@@ -41,7 +41,7 @@ class Leistender:
 class ERechnung:
     profil: str = "ZUGFeRD"
     format: str = "pdfa3"
-    zahlungsziel_tage: int = 14
+    zahlungsziel_tage: int | None = None
     iban: str = ""
     bic: str = ""
     bank: str = ""
@@ -138,10 +138,14 @@ def lade_config(user: str, *, basis: Path | None = None) -> Config:
         leitweg_id=_get(parser, "leistender", "leitweg_id", fallback=""),
     )
 
+    # Zahlungsziel OPTIONAL: leer/fehlt = kein Zahlungsziel (kein BT-9,
+    # kein 'Zahlbar bis' im PDF-Fuß). Die Spalte 'zahlungsziel_tage'
+    # der kunden.ods hat Vorrang (leere Zelle dort = ebenfalls keins).
+    zz_roh = _get(parser, "erechnung", "zahlungsziel_tage", fallback="").strip()
     erechnung = ERechnung(
         profil=_get(parser, "erechnung", "profil", fallback="ZUGFeRD"),
         format=_get(parser, "erechnung", "format", fallback="pdfa3"),
-        zahlungsziel_tage=int(_get(parser, "erechnung", "zahlungsziel_tage", fallback="14")),
+        zahlungsziel_tage=int(zz_roh) if zz_roh else None,
         iban=_get(parser, "erechnung", "iban", fallback=""),
         bic=_get(parser, "erechnung", "bic", fallback=""),
         bank=_get(parser, "erechnung", "bank", fallback=""),

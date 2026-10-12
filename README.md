@@ -2,7 +2,7 @@
 
 Lokales CLI-Tool: iCal-Stunden + ODS-Auslagen + ODS-Kundenstammdaten
 werden zu B2B-Rechnungen (immer 19 % USt) verarbeitet, mit eingebettetem
-Faktur-X-XML (ZUGFeRD, Profil EN 16931). Versand per SMTP im finalen Lauf.
+Faktur-X-XML (ZUGFeRD, Profil EN 16931). E-Mail-Versand per SMTP nur mit `--send` (Standard: kein Versand).
 
 ## Fixierte Parameter
 
@@ -192,7 +192,7 @@ freigabe). 'betrag_netto' als '42,00' oder '42.00'. USt-Satz-Spalte entfällt (i
 
 - `yes` oder `ja` → Zeile wird abgerechnet (Groß-/Kleinschreibung egal).
 - leer/`no`/`nein` → Zeile wird **übersprungen** (Ausgabe: WARNUNG je Zeile).
-- Die Rechnung ist **finale** (echte Re-Nr, State, ZUGFeRD, Versand), sobald
+- Die Rechnung ist **finale** (echte Re-Nr, State, ZUGFeRD; Versand nur mit `--send`), sobald
   **mindestens eine** Zeile der Datei `yes`/`ja` hat – sonst ENTWURF.
 - Fehlt die Spalte komplett: keine Zeile freigegeben → ENTWURF + WARNUNG.
 
@@ -277,8 +277,11 @@ Rechnung, bis freigabe=yes/ja`. Kein Kunde verschwindet stillschweigend.
 # (freigabe=yes in mindestens einer Zeile vorausgesetzt). Re-Nr bleibt ENTWURF-…, kein State.
 ./run-reu.py alice Q1 2025 --full --dry-run
 
-# Finale Rechnung + ZUGFeRD + Versand + Journal (freigabe=yes vorausgesetzt)
+# Finale Rechnung + ZUGFeRD + Journal, OHNE E-Mail-Versand (Standard!)
 ./run-reu.py alice 11 2025 --full
+
+# Finale Rechnung + ZUGFeRD + Journal + E-Mail-Versand (freigabe=yes vorausgesetzt)
+./run-reu.py alice 11 2025 --full --send
 
 # Rechnungsübersicht aus State (fürs Finanzamt)
 ./run-reu.py alice --journal --journal-year 2025
@@ -297,7 +300,7 @@ wird nur die Hilfe ausgegeben – keine Ausführung.
 | Rechnungs-PDF erzeugen | ✓ | ✓ |
 | ZUGFeRD-XML + PDF/A-3-Embedding (nur bei freigabe=yes) | ✓ | ✓ — damit PDF+XML prüfbar |
 | Re-Nr vergeben + State schreiben | ✓ | ✗ — verwendet ENTWURF-… |
-| E-Mail-Versand | ✓ | ✗ — komplett übersprungen |
+| E-Mail-Versand | nur mit `--send` | ✗ — komplett übersprungen |
 | Ausgabe in | out/final/ | out/dry-run/ |
 
 Die Freigabe-Spalte und --dry-run sind orthogonal: freigabe steuert Entwurf-vs-finale-Logik

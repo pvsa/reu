@@ -5,11 +5,12 @@ Aufruf:
     ./run-reu.py <user> <month> <year> --hours
     ./run-reu.py <user> <month> <year> --expenses
     ./run-reu.py <user> <month> <year> --invoice
-    ./run-reu.py <user> <month> <year> --full [--dry-run]
+    ./run-reu.py <user> <month> <year> --full [--dry-run] [--send]
     ./run-reu.py <user> --journal <year>
 
 <month> erlaubt: Einzelmonat (11), Monatsbereich (10-12) oder Quartal (Q4).
 Ohne Action-Flag wird nur die Hilfe angezeigt (keine Ausführung).
+E-Mail-Versand NUR mit --send (Standard: kein Versand).
 """
 from __future__ import annotations
 
@@ -383,9 +384,19 @@ def cmd_invoice(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: st
     return 0
 
 
-def cmd_full(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: str | None) -> int:
+def cmd_full(cfg: Config, zeitraum: Zeitraum, *, dry_run: bool, nur_kunde: str | None,
+             send: bool = False) -> int:
     rc = cmd_invoice(cfg, zeitraum, dry_run=dry_run, nur_kunde=nur_kunde)
     if dry_run:
+        return rc
+    # E-Mail-Versand NUR auf expliziten Wunsch (--send): Wie und an wen
+    # versendet wird, ist noch nicht final spezifiziert (siehe TODO.md) –
+    # ohne den Switch wird nichts gesendet, nur ein Hinweis ausgegeben.
+    if not send:
+        print(
+            "E-Mail-Versand übersprungen – kein --send gesetzt. "
+            "(Versand-Modus/Empfänger sind noch nicht spezifiziert, siehe TODO.)"
+        )
         return rc
     # Versand nur im echten Lauf
     kunden = _lade_kunden(cfg)
@@ -457,10 +468,13 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--hours", action="store_true", help="Nur Stunden aus iCal anzeigen")
     g.add_argument("--expenses", action="store_true", help="Nur Auslagen aus ODS prüfen")
     g.add_argument("--invoice", action="store_true", help="Rechnung(en) erzeugen (kein Versand)")
-    g.add_argument("--full", action="store_true", help="Rechnung + ZUGFeRD + Versand (finale)")
+    g.add_argument("--full", action="store_true", help="Rechnung + ZUGFeRD (finale); Versand nur mit --send")
     g.add_argument("--journal", action="store_true", help="Rechnungsübersicht aus State")
     p.add_argument("--dry-run", action="store_true",
-                   help="PDF/XML erzeugen, aber kein Versand, keine Re-Nr, kein State")
+                  help="kein Versand, keine Re-Nr, kein State (Ausgabe in out/dry-run/)")
+    p.add_argument("--send", action="store_true",
+                  help="finale Rechnungen nach dem Erzeugen per E-Mail versenden "
+                       "([smtp]-Sektion); Standard: kein Versand")
     p.add_argument("--kunde", help="Nur diesen Kunden verarbeiten (Kürzel aus kunden.ods)")
     p.add_argument("--journal-year", type=int, dest="jyear",
                    help="Jahr-Filter für --journal")
@@ -508,7 +522,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.invoice:
             return cmd_invoice(cfg, zeitraum, dry_run=args.dry_run, nur_kunde=args.kunde)
         if args.full:
-            return cmd_full(cfg, zeitraum, dry_run=args.dry_run, nur_kunde=args.kunde)
+            return cmd_full(cfg, zeitraum, dry_run=args.dry_run, nur_kunde=args.kunde,
+                            send=args.send)
     except Exception as exc:  # noqa: BLE001
         print(f"FEHLER: {exc}")
         return 1

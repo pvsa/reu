@@ -2,6 +2,13 @@
 
 ## Später angehen
 
+- [ ] **E-Mail-Versand spezifizieren (wie und an wen)**:
+  Derzeit sendet REU NUR mit `--send` (Standard: kein Versand, nur Hinweis).
+  Empfänger ist [smtp] recipient_email – eine Adresse für ALLE Rechnungen,
+  Text hardcoded in `cmd_full`. Später klären:
+  Empfänger je Kunde (eigene Spalte in der kunden.ods?),
+  Betreff-/Text-Vorlage, Anrede, CC/Archiv-Adresse.
+
 - [ ] **GitHub-Anbindung**: Repo anlegen, Commit/Push der aktuellen Sandbox-Version.
   Vorbedingung: GitHub-Connector im Vibe-Session aktivieren (`list_unauthenticated_connectors`
   → `ask_enable_connector`), danach `gh`/`git` authentifiziert nutzen.

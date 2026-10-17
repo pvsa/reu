@@ -52,6 +52,13 @@ class ERechnung:
     iban: str = ""
     bic: str = ""
     bank: str = ""
+    # PDF/A-3-Werkzeugkette (format = pdfa3, Standard):
+    # gs_bin: Ghostscript-Binary (Default 'gs', gs >= 9.50 noetig –
+    # Debian 12+ liefern 10.x mit). icc_profil/pdfa_def: leer = die
+    # Ressourcen der installierten gs-Version automatisch suchen.
+    gs_bin: str = "gs"
+    icc_profil: str = ""
+    pdfa_def: str = ""
 
 
 @dataclass
@@ -173,6 +180,9 @@ def lade_config(user: str, *, basis: Path | None = None) -> Config:
         iban=_get(parser, "erechnung", "iban", fallback=""),
         bic=_get(parser, "erechnung", "bic", fallback=""),
         bank=_get(parser, "erechnung", "bank", fallback=""),
+        gs_bin=_get(parser, "erechnung", "gs_bin", fallback="gs"),
+        icc_profil=_get(parser, "erechnung", "icc_profil", fallback=""),
+        pdfa_def=_get(parser, "erechnung", "pdfa_def", fallback=""),
     )
 
     pflichtspalten_roh = _get(parser, "auslagen", "pflichtspalten", fallback="")

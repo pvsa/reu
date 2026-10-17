@@ -24,9 +24,12 @@
   werden von `reu/zugferd.py` versionstolerant unterstützt, 1.x wird mit
   klarer Meldung abgewiesen; `reportlab`, `requests`, `icalendar`, `pytz`;
   `lxml`/`pypdf` transitiv via drafthorse).
-- [ ] **Volle PDF/A-3-Konformität**: Quell-PDF vor `attach_xml` PDF/A-konform
-  erzeugen (ICC-Profil/OutputIntent hinterlegen, z.B. via Ghostscript
-  oder reportlab PDF/A-Option), da drafthorse kein PDF/A aus dem Nichts baut.
+- [x] **Volle PDF/A-3-Konformität**: Quell-PDF wird vor `attach_xml` per
+  Ghostscript nach PDF/A-3b konvertiert (`reu/pdfa.py`, `-dPDFA=3
+  -dPDFACompatibilityPolicy=1`, gepatchte `PDFA_def.ps` mit sRGB-ICC);
+  schaltbar via `[erechnung] format`, gs-Binärdatei/ICC/def per Konfig
+  übersteuerbar. Rest-Validierung beim ersten echten Versand: veraPDF
+  (PDF/A) + Mustang (Faktur-X), siehe README.
 - [ ] **Mustang-Validierung in CI** integrieren (Docker) laut README.
 - [ ] **drafthorse-Lizenzhinweis** in README ergänzen (Apache-2.0 Code,
   proprietäre FeRD-Lizenz für mitgelieferte .xsd-Schemata).

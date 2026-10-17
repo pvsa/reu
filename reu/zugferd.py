@@ -1,7 +1,12 @@
 """Stufe 4: ZUGFeRD – Faktur-X XML (EN 16931) + Einbettung in PDF/A-3.
 
+Pipeline: reportlab-PDF → Ghostscript-Konvertierung zu PDF/A-3B
+(reu/pdfa.py, -dPDFA=3) → drafthorse bettet das XML (AFRelationship
+/Alternative, XMP mit pdfaid + Factur-X-Extension, OutputIntent wird
+vom PDF/A-PDF übernommen).
+
 Verwendet drafthorse für das XML (CrossIndustryInvoice, Profil EN 16931)
-und drafthorse.pdf.attach_xml für das PDF/A-3 + AF-Embedding.
+und drafthorse.pdf.attach_xml für das AF-Embedding.
 
 Mapping (B2B, immer 19% USt, ein Stunden-Sammelposten + Serviceposten
 je Service und Monat + Auslagenposten).
@@ -26,6 +31,7 @@ from drafthorse.pdf import attach_xml
 
 from .config import Config
 from .kunden import Kunde
+from .pdfa import PdfAError, pdfa3_konvertieren
 from .util import (
     UST_PROZENT,
     UNIT_STUNDE,
@@ -356,6 +362,22 @@ def erzeuge_zugferd_pdf(
         zeitraum=zeitraum,
     )
     pdf_bytes = pdf_pfad.read_bytes()
+    # PDF/A-3B: Die ZUGFeRD-Spezifikation fordert einen PDF/A-3-Container.
+    # reportlab erzeugt kein PDF/A (Base-14-Fonts ungenau: nicht eingebettet,
+    # Farben uncharakterisiert) – Ghostscript schließt die Lücke (Fonts
+    # einbetten, sRGB-OutputIntent). Nur bei format=pdfa3 (Standard);
+    # andere Werte lassen die PDF wie bisher unverändert (dann KEIN
+    # PDF/A – für Tests/Ausnahmen dokumentiert).
+    if cfg.erechnung.format == "pdfa3":
+        try:
+            pdf_bytes = pdfa3_konvertieren(
+                pdf_bytes,
+                gs_bin=cfg.erechnung.gs_bin,
+                icc_profil=cfg.erechnung.icc_profil or None,
+                pdfa_def=cfg.erechnung.pdfa_def or None,
+            )
+        except PdfAError as exc:
+            raise ZugferdError(str(exc)) from exc
     zugferd_pdf = bette_xml_in_pdf(pdf_bytes, xml)
     ausgabe_pfad.parent.mkdir(parents=True, exist_ok=True)
     ausgabe_pfad.write_bytes(zugferd_pdf)

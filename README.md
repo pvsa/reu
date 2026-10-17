@@ -57,6 +57,7 @@ reu/
 │   ├── ical.py             # Stufe 1: Stunden aus iCal → dict
 │   ├── expenses.py         # Stufe 2: Auslagen aus ODS + Freigabe-Check
 │   ├── invoice.py          # Stufe 3: Rechnungs-PDF (reportlab)
+│   ├── pdfa.py            # PDF/A-3b-Konvertierung via Ghostscript (pdfwrite)
 │   ├── zugferd.py          # Stufe 4: drafthorse XML + PDF/A-3-Embedding
 │   ├── smtp.py             # Versand (no-op im Dry-Run)
 │   ├── state.py            # Re-Nr-Kreis + Journal (Blatt 'Rechnungen' der kunden.ods)
@@ -344,6 +345,7 @@ re_nr | datum | kunde | leistungszeitraum | netto | ust | brutto | status
 drafthorse     # Faktur-X XML (EN 16931) + PDF/A-3-Embedding
 pypdf          # (transitiv über drafthorse)
 reportlab      # Rechnungs-PDF
+ghostscript    # PDF/A-3b-Konvertierung des Rechnungs-PDF (re/pdfa.py)
 requests icalendar pytz  # iCal-Download/Parse
 lxml           # XML-Validierung (transitiv über drafthorse)
 ```
@@ -351,7 +353,7 @@ lxml           # XML-Validierung (transitiv über drafthorse)
 Installieren (Debian/Ubuntu ohne pip):
 
 ```bash
-apt install python3-drafthorse python3-reportlab python3-icalendar \
+apt install ghostscript python3-drafthorse python3-reportlab python3-icalendar \
             python3-pytz python3-requests python3-lxml python3-pypdf
 ```
 
@@ -401,13 +403,45 @@ java -jar Mustang-CLI.jar --action validate --source out/final/ABC_Rechnung_2025
 ```
 
 Das eingebettete XML wird beim Erzeugen bereits gegen das EN-16931-XSD
-validiert (via drafthorse + lxml); die PDF/A-3-Konformität des sichtbaren
-PDFs sollte zusätzlich via Mustang/VeraPDF geprüft werden.
+validiert (via drafthorse + lxml). Das sichtbare PDF wird dagegen durch
+REU selbst PDF/A-3b-konform erzeugt (siehe unten) und kann zusätzlich
+mit veraPDF geprüft werden:
 
-### Hinweis PDF/A-3
+```bash
+verapdf out/final/ABC_Rechnung_2025-001_ZUGFeRD.pdf
+```
 
-drafthorse setzt das PDF/A-3-Flag und die AF-Relation, benötigt dafür aber
-ein Quell-PDF mit OutputIntent/ICC-Profil. reportlab erzeugt standardmäßig
-kein PDF/A. Für volle PDF/A-3-Konformität das Quell-PDF entsprechend
-erzeugen (ICC-Profil hinterlegen) oder das PDF nachträglich konvertieren.
-Das eingebettete Faktur-X-XML ist in jedem Fall gültig (EN 16931).
+### PDF/A-3-Pipeline
+
+drafthorse setzt nur das PDF/A-3-Flag und die AF-Relation; es macht ein
+beliebiges Quell-PDF aber **nicht** konform. REU löst das daher zweistufig:
+
+1. **`reu/pdfa.py`**: Das reportlab-PDF wird vor dem Embedding per
+   Ghostscript nach **PDF/A-3b** konvertiert:
+   `gs -sDEVICE=pdfwrite -dPDFA=3 -sColorConversionStrategy=RGB
+   -dPDFACompatibilityPolicy=1 --permit-file-read=<srgb.icc>
+   -o out.pdf <gepatchte PDFA_def.ps> in.pdf`
+   Die mitgelieferte `PDFA_def.ps` wird automatisch gesucht (Debian/Ubuntu:
+   `/usr/share/ghostscript/<version>/lib/`), die `/ICCProfile`-Zeile wird
+   auf den gefundenen sRGB-ICC-Pfad umgebogen. `-dPDFACompatibilityPolicy=1`
+   sorgt dafür, dass gs bei nicht konvertierbarem Inhalt **mit Fehler
+   abbricht**, statt stillschweigend ein nicht-konformes PDF zu erzeugen.
+2. **`reu/zugferd.py`**: drafthorse bettet das Faktur-X-XML in das bereits
+   konforme PDF ein (XMP `pdfaid:part=3/B`, Factur-X-Extension,
+   AFRelationship `/Alternative`, Dateiname `factur-x.xml`).
+
+Konfiguration in `[erechnung]`:
+
+| Option | Default | Bedeutung |
+|---|---|---|
+| `format` | `pdfa3` | `pdfa3` = Ghostscript-Konvertierung vor dem Embedding; jeder andere Wert überspringet sie |
+| `gs_bin` | `gs` | Pfad zum Ghostscript-Binary |
+| `icc_profil` | leer = auto | sRGB-ICC-Profil; leer = automatische Suche (`.../iccprofiles/srgb.icc`, `default_rgb.icc`, `/usr/share/color/icc/colord/sRGB.icc`) |
+| `pdfa_def` | leer = auto | Pfad zur `PDFA_def.ps`; leer = automatische Suche im Ghostscript-lib-Verzeichnis |
+
+Tritt bei der Konvertierung ein Fehler auf (gs fehlt, ICC-Profil nicht
+gefunden, gs bricht ab), bricht der Lauf mit einer klaren Meldung ab –
+es wird **nie** eine ZUGFeRD-PDF ohne PDF/A-3-Konvertierung erzeugt.
+
+Release-Gate: Vor dem ersten echten Versand die erzeugte PDF einmalig mit
+**veraPDF** (PDF/A) und **Mustang** (Faktur-X gesamt) validieren (s. o.).

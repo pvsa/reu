@@ -458,8 +458,20 @@ docker run --rm -v "$PWD/out/final:/data" verapdf/cli \
 
 ### Mustang installieren und aufrufen (Faktur-X-Prüfung)
 
-Braucht Java; `Mustang-CLI.jar` von <https://www.mustangproject.org>
-(Downloads) oder per Docker:
+Braucht Java. Mustang-CLI als fertiges JAR (alle Abhängigkeiten gebündelt)
+von **Maven Central** laden – die Projektseite
+(<https://www.mustangproject.org>) ist zeitweise nicht erreichbar, und die
+GitHub-Releases enthalten die JAR nicht immer:
+
+```bash
+# aktuellste Version + Dateiname: siehe
+# https://repo1.maven.org/maven2/org/mustangproject/Mustang-CLI/maven-metadata.xml
+wget "https://repo1.maven.org/maven2/org/mustangproject/Mustang-CLI/2.26.0/Mustang-CLI-2.26.0.jar"
+```
+
+REU erkennt die JAR im Projektverzeichnis automatisch (Suchmuster
+`Mustang-CLI*.jar` – der versionierte Name passt); alternativ per
+`REU_MUSTANG_JAR` zeigen. Oder per Docker (ohne lokale JRE):
 
 ```bash
 docker run --rm -v "$PWD/out/final:/data" mustangproject/cli \

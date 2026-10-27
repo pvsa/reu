@@ -358,6 +358,15 @@ requests icalendar pytz  # iCal-Download/Parse
 lxml           # XML-Validierung (transitiv über drafthorse)
 ```
 
+**Java ist KEINE REU-Abhängigkeit.** Das Erzeugen der Rechnungen
+(Ghostscript-PDF/A-3-Konvertierung, Faktur-X-XML, Einbettung) läuft
+komplett ohne Java. Eine JRE (`apt install default-jre`) wird **nur**
+für die externen Validierungswerkzeuge **veraPDF** und **Mustang**
+gebraucht (siehe 'Validierung der ZUGFeRD-PDF') – REU selbst kommt ohne
+aus. Ohne lokale JRE funktionieren beide Prüfungen auch über Docker
+(`verapdf/cli`, `mustangproject/cli`), das bringt seine eigene Laufzeit
+mit.
+
 Installieren (Debian/Ubuntu ohne pip):
 
 ```bash
@@ -398,6 +407,9 @@ stillschweigend übersprungen – der Lauf bricht nicht ab.
 
 Vor dem ersten echten Versand jede erzeugte ZUGFeRD-PDF einmalig mit
 beiden Werkzeugen prüfen – sie decken unterschiedliche Fehlerquellen ab.
+Beide basieren auf **Java** – deshalb die einzige (optionale)
+JRE-Abhängigkeit des Projekts: Sie gilt nur für diese Validierung,
+nicht für REU selbst (ohne lokale JRE: Docker-Varianten, s. u.).
 Am einfachsten über das Prüfgate `--valide` (siehe unten):
 
 | Werkzeug | prüft |

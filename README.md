@@ -61,6 +61,7 @@ reu/
 │   ├── zugferd.py          # Stufe 4: drafthorse XML + PDF/A-3-Embedding
 │   ├── smtp.py             # Versand (no-op im Dry-Run)
 │   ├── state.py            # Re-Nr-Kreis + Journal (Blatt 'Rechnungen' der kunden.ods)
+│   ├── validate.py         # Prüfgate --valide (veraPDF + Mustang, Exit-Code-Gate)
 │   └── util.py             # Hilfsfunktionen, Zeitraum-Parsing + Konstanten
 ├── conf/
 │   ├── alice.conf          # EINZIGE Beispiel-Config
@@ -293,11 +294,18 @@ Rechnung, bis freigabe=yes/ja`. Kein Kunde verschwindet stillschweigend.
 # Rechnungsübersicht aus dem Blatt 'Rechnungen' der kunden.ods (fürs Finanzamt)
 ./run-reu.py alice --journal --journal-year 2025
 
+# Prüfgate: alle finalen ZUGFeRD-PDFs mit veraPDF + Mustang validieren
+./run-reu.py alice --valide
+
+# ... oder gezielt: Dry-Run-Entwürfe / einzelne Dateien / ein Verzeichnis
+./run-reu.py alice --valide out/dry-run/
+./run-reu.py alice --valide out/final/ABC_Rechnung_2025-001_ZUGFeRD.pdf
+
 # Nur einen Kunden verarbeiten
 ./run-reu.py alice Q4 2025 --invoice --kunde ABC
 ```
 
-**Ohne Action-Flag** (--hours/--expenses/--invoice/--full/--journal)
+**Ohne Action-Flag** (--hours/--expenses/--invoice/--full/--journal/--valide)
 wird nur die Hilfe ausgegeben – keine Ausführung.
 
 ### Dry-Run (--dry-run)
@@ -389,7 +397,8 @@ stillschweigend übersprungen – der Lauf bricht nicht ab.
 ## Validierung der ZUGFeRD-PDF (Pflicht)
 
 Vor dem ersten echten Versand jede erzeugte ZUGFeRD-PDF einmalig mit
-beiden Werkzeugen prüfen – sie decken unterschiedliche Fehlerquellen ab:
+beiden Werkzeugen prüfen – sie decken unterschiedliche Fehlerquellen ab.
+Am einfachsten über das Prüfgate `--valide` (siehe unten):
 
 | Werkzeug | prüft |
 |---|---|
@@ -449,6 +458,31 @@ oder lokal:
 
 ```bash
 java -jar Mustang-CLI.jar --action validate --source out/final/ABC_Rechnung_2025-001_ZUGFeRD.pdf
+```
+
+### Prüfgate: --valide (empfohlen vor jedem Versand)
+
+`./run-reu.py <user> --valide [PDF ...]` fährt beide Prüfungen über die
+erzeugten PDFs und verdichtet sie zu einem Exit-Code – ideal als
+Skript-/Release-Gate:
+
+- **Ohne Pfad-Argumente:** alle `*.pdf` aus `out/final/`.
+- **Argumente:** einzelne Dateien oder Verzeichnisse, z.B.
+  `--valide out/dry-run/` für die Entwürfe des Dry-Runs.
+- **Tool-Suche** (lokal vor Docker): veraPDF via `verapdf` im PATH,
+  sonst Docker `verapdf/cli`; Mustang via `REU_MUSTANG_JAR` oder
+  `Mustang-CLI*.jar` im Projektverzeichnis (mit `java`), sonst Docker
+  `mustangproject/cli`.
+- Fehlt ein Werkzeug, wird seine Prüfung mit Hinweis übersprungen
+  (und zählt nicht als bestanden); fehlen alle, endet das Gate mit
+  Exit 1.
+- **Exit-Codes: 0** = alle durchgeführten Prüfungen bestanden,
+  **1** = mindestens eine Prüfung fehlgeschlagen, nichts zu prüfen
+  oder kein Prüfwerkzeug verfügbar.
+
+```bash
+./run-reu.py alice Q1 2025 --full --dry-run   # PDFs erzeugen (keine Re-Nr verbraucht)
+./run-reu.py alice --valide out/dry-run/      # valide? → Exit 0
 ```
 
 ### „PDF 1.4“ im Dokumentenbetrachter ist normal

@@ -7,6 +7,7 @@ Aufruf:
     ./run-reu.py <user> <month> <year> --invoice
     ./run-reu.py <user> <month> <year> --full [--dry-run] [--send]
     ./run-reu.py <user> --journal <year>
+    ./run-reu.py <user> --valide [PDF ...]
 
 <month> erlaubt: Einzelmonat (11), Monatsbereich (10-12) oder Quartal (Q4).
 Ohne Action-Flag wird nur die Hilfe angezeigt (keine Ausführung).
@@ -29,6 +30,7 @@ from reu import (
     services as services_mod,
     smtp as smtp_mod,
     state as state_mod,
+    validate as validate_mod,
     zugferd as zugferd_mod,
 )
 from reu.config import Config
@@ -489,6 +491,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--journal", action="store_true",
         help="Rechnungsübersicht aus dem Blatt 'Rechnungen' der kunden.ods",
     )
+    g.add_argument(
+        "--valide", nargs="*", metavar="PDF",
+        help="ZUGFeRD-PDFs validieren (veraPDF PDF/A-3b + Mustang Faktur-X); "
+             "ohne Angabe: alle PDFs aus out/final. "
+             "Exit 0 = valide, 1 = nicht valide/nichts geprüft",
+    )
     p.add_argument("--dry-run", action="store_true",
                   help="kein Versand, keine Re-Nr, Rechnungen-Liste "
                        "unverändert (Ausgabe in out/dry-run/)")
@@ -504,10 +512,23 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    hat_action = any([args.hours, args.expenses, args.invoice, args.full, args.journal])
+    hat_action = any([args.hours, args.expenses, args.invoice, args.full, args.journal,
+                      args.valide is not None])
     if not hat_action:
         parser.print_help()
         return 0
+
+    if args.valide is not None:
+        try:
+            cfg = config_mod.lade_config(args.user)
+        except config_mod.ConfigError as exc:
+            print(f"Config-Fehler: {exc}")
+            return 2
+        try:
+            return validate_mod.cmd_valide(cfg, args.valide)
+        except Exception as exc:  # noqa: BLE001
+            print(f"FEHLER: {exc}")
+            return 1
 
     if args.journal:
         try:

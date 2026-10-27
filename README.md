@@ -388,8 +388,57 @@ stillschweigend übersprungen – der Lauf bricht nicht ab.
 
 ## Validierung der ZUGFeRD-PDF (Pflicht)
 
-Die erzeugte ZUGFeRD-PDF muss vor Versand validiert werden, z.B. mit
-Mustang (offiziell):
+Vor dem ersten echten Versand jede erzeugte ZUGFeRD-PDF einmalig mit
+beiden Werkzeugen prüfen – sie decken unterschiedliche Fehlerquellen ab:
+
+| Werkzeug | prüft |
+|---|---|
+| **veraPDF** | PDF/A-3b-Konformität des PDFs (ISO 19005-3): eingebettete Fonts, Farben/ICC-OutputIntent, XMP-Metadaten, Objektregeln |
+| **Mustang** | Faktur-X gesamt: EN-16931-XML + ZUGFeRD-Einbettung (AF-Struktur, Metadaten) |
+
+Das eingebettete XML wird zwar schon beim Erzeugen gegen das
+EN-16931-XSD validiert (drafthorse + lxml) – das ersetzt die externe
+Validierung nicht.
+
+### veraPDF installieren (PDF/A-3b-Prüfung)
+
+veraPDF ist nicht in den Debian/Ubuntu-Quellen. Installation:
+
+- **Installer (CLI + GUI):** benötigt Java (`apt install default-jre`).
+  Installer-Paket von <https://software.verapdf.org> laden, entpacken,
+  `./verapdf-install` ausführen – installiert den CLI `verapdf` und die GUI.
+- **Docker:** `docker pull verapdf/cli`
+- **Nur GUI:** `flatpak install flathub org.verapdf.veraPDF`
+
+Aufruf:
+
+```bash
+# eine Datei, explizit gegen das PDF/A-3b-Profil:
+verapdf -f 3b out/final/ABC_Rechnung_2025-001_ZUGFeRD.pdf
+
+# alle finalen Rechnungen auf einmal (Verzeichnis reicht als Argument):
+verapdf -f 3b out/final/
+```
+
+- `-f 3b` wählt das PDF/A-3b-Profil; ohne `-f` liest veraPDF die
+  Konformitätsangabe aus den XMP-Metadaten (Fallback: PDF/A-1b) –
+  deshalb immer `-f 3b` mitgeben.
+- Der Bericht (XML) endet mit `compliant="true|false"`, bei Fehlern mit
+  Fundstellen je Regel-ID.
+- Exit-Codes (für Gates/Skripte): **0** = valide, **1** = nicht valide,
+  4 = keine Datei gefunden, 7 = PDF nicht parsbar.
+
+Docker-Variante:
+
+```bash
+docker run --rm -v "$PWD/out/final:/data" verapdf/cli \
+  -f 3b /data/ABC_Rechnung_2025-001_ZUGFeRD.pdf
+```
+
+### Mustang installieren und aufrufen (Faktur-X-Prüfung)
+
+Braucht Java; `Mustang-CLI.jar` von <https://www.mustangproject.org>
+(Downloads) oder per Docker:
 
 ```bash
 docker run --rm -v "$PWD/out/final:/data" mustangproject/cli \
@@ -402,14 +451,18 @@ oder lokal:
 java -jar Mustang-CLI.jar --action validate --source out/final/ABC_Rechnung_2025-001_ZUGFeRD.pdf
 ```
 
-Das eingebettete XML wird beim Erzeugen bereits gegen das EN-16931-XSD
-validiert (via drafthorse + lxml). Das sichtbare PDF wird dagegen durch
-REU selbst PDF/A-3b-konform erzeugt (siehe unten) und kann zusätzlich
-mit veraPDF geprüft werden:
+### „PDF 1.4“ im Dokumentenbetrachter ist normal
 
-```bash
-verapdf out/final/ABC_Rechnung_2025-001_ZUGFeRD.pdf
-```
+GNOME Document Viewer (Evince) zeigt die Versionsnummer der
+Dateikopfzeile (`%PDF-1.4`) – **nicht** den PDF/A-Status. Die Kopfzeile
+schreibt Ghostscript beim pdfwrite-Schritt (Zielversion =
+CompatibilityLevel, Standard 1.4); drafthorse (pypdf) behält sie beim
+XML-Embedding. Die PDF/A-3b-Konformität steckt dagegen in den
+XMP-Metadaten (`pdfaid:part=3`, `conformance=B`) und in den
+inhaltlichen Regeln (OutputIntent mit sRGB-ICC, eingebettete Fonts) –
+genau das prüft veraPDF, unabhängig von der Kopfzeilen-Version.
+Ein „PDF 1.4“ ist also kein Fehler; verbindlich ist das
+veraPDF-/Mustang-Ergebnis.
 
 ### PDF/A-3-Pipeline
 

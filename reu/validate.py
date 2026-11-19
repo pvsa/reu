@@ -23,6 +23,10 @@ Tool-Suche je Prüfung (lokal vor Docker):
 
 Fehlt ein Werkzeug, wird die Prüfung mit Hinweis übersprungen (und
 nicht als bestanden gewertet); fehlen ALLE, endet das Gate mit Exit 1.
+Reine ENTWÜRFE ohne eingebettetes Faktur-X (keine freigegebene Auslage –
+dann läuft das PDF nicht durch die PDF/A-3-Pipeline) werden mit Hinweis
+übersprungen: Sie sind keine E-Rechnung und würden die Prüfung
+zwangsläufig fehlschlagen lassen.
 
 Exit-Codes: **0** = alle durchgeführten Prüfungen bestanden,
 **1** = mindestens eine Prüfung fehlgeschlagen, nichts zu prüfen oder
@@ -155,6 +159,28 @@ def _kuerze(text: str, grenze: int = 600) -> str:
     return text[:grenze] + f" … (+{len(text) - grenze} Zeichen)"
 
 
+# Bekannte Namen eingebetteter E-Rechnungs-XML (ZUGFeRD/Factur-X, XRechnung)
+_FACTURX_MARKER = (b"factur-x.xml", b"zugferd-invoice.xml", b"xrechnung.xml")
+
+
+def ist_erechnung(pdf: Path) -> bool:
+    """True, wenn das PDF ein eingebettetes Faktur-X/ZUGFeRD-XML trägt.
+
+    Reine ENTWÜRFE (keine freigegebene Auslage) durchlaufen die
+    PDF/A-3-Pipeline nicht und bekommen kein XML eingebettet – sie sind
+    keine E-Rechnung und würden die Faktur-X-Prüfung zwangsläufig
+    fehlschlagen lassen. Erkennung: *_ZUGFeRD.pdf-Suffix oder Name des
+    eingebetteten XML im PDF-Katalog.
+    """
+    if pdf.name.lower().endswith("_zugferd.pdf"):
+        return True
+    try:
+        roh = pdf.read_bytes()
+    except OSError:
+        return True  # Lesefehler nicht fälschlich als Entwurf deuten
+    return any(marker in roh for marker in _FACTURX_MARKER)
+
+
 def cmd_valide(cfg: Config, argumente: list[str]) -> int:
     """Prüft PDFs mit allen verfügbaren Werkzeugen, gibt Exit-Code zurück."""
     standard_verz = cfg.ausgabe_verz / "final"
@@ -194,8 +220,18 @@ def cmd_valide(cfg: Config, argumente: list[str]) -> int:
     print(f"Validiere {len(pfade)} PDF(s):")
     gesamt = 0
     fehlgeschlagen = 0
+    uebersprungen = 0
     for pdf in pfade:
         print(f"\n{pdf.name}")
+        if not ist_erechnung(pdf):
+            uebersprungen += 1
+            print(
+                "  ÜBERSPRUNGEN: kein eingebettetes Faktur-X – vermutlich reiner\n"
+                "        Entwurf (keine freigegebene Auslage: kein PDF/A-3-Schritt,\n"
+                "        kein XML). Prüfbare PDF erzeugen: freigabe=yes setzen und\n"
+                "        --full --dry-run laufen lassen."
+            )
+            continue
         for pruefung in (
             pruefe_verapdf(pdf, verapdf_bin=verapdf_bin, docker_bin=docker_bin),
             pruefe_mustang(pdf, jar=jar, java_bin=java_bin, docker_bin=docker_bin),
@@ -213,9 +249,19 @@ def cmd_valide(cfg: Config, argumente: list[str]) -> int:
                     print(f"       {_kuerze(ausgabe)}")
 
     if gesamt == 0:
-        print("FEHLER: keine Prüfung durchgeführt – siehe Hinweise oben.")
+        if uebersprungen:
+            print(
+                "\nFEHLER: keine prüfbare ZUGFeRD-PDF – alle angegebenen PDFs sind\n"
+                "reine Entwürfe ohne eingebettetes Faktur-X (freigabe=yes setzen,\n"
+                "dann --full --dry-run)."
+            )
+        else:
+            print("\nFEHLER: keine Prüfung durchgeführt – siehe Hinweise oben.")
         return 1
-    print(f"\nErgebnis: {gesamt - fehlgeschlagen}/{gesamt} Prüfung(en) bestanden.")
+    ergebnis = f"\nErgebnis: {gesamt - fehlgeschlagen}/{gesamt} Prüfung(en) bestanden."
+    if uebersprungen:
+        ergebnis += f" ({uebersprungen} reine Entwürfe übersprungen)"
+    print(ergebnis)
     if fehlgeschlagen:
         print("FEHLER: mindestens eine Prüfung fehlgeschlagen – nicht versenden.")
         return 1
@@ -226,6 +272,7 @@ __all__ = [
     "TIMEOUT_SEKUNDEN",
     "ValidierError",
     "cmd_valide",
+    "ist_erechnung",
     "pdf_pfade",
     "pruefe_mustang",
     "pruefe_verapdf",

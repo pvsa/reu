@@ -500,6 +500,13 @@ Skript-/Release-Gate:
 - Fehlt ein Werkzeug, wird seine Prüfung mit Hinweis übersprungen
   (und zählt nicht als bestanden); fehlen alle, endet das Gate mit
   Exit 1.
+- **Reine Entwürfe werden übersprungen:** PDFs ohne eingebettetes
+  Faktur-X (erkennbar am fehlenden `_ZUGFeRD`-Suffix) sind keine
+  E-Rechnungen – sie laufen bei fehlender Freigabe nicht durch die
+  PDF/A-3-Pipeline und würden die Prüfung zwangsläufig fehlschlagen
+  lassen. `--valide` meldet das mit Hinweis statt eines Regel-Dumps;
+  prüfbare PDFs erzeugen: `freigabe=yes` setzen und `--full --dry-run`.
+  Ein beliebiges PDF NUR auf PDF/A prüfen: veraPDF direkt aufrufen.
 - **Exit-Codes: 0** = alle durchgeführten Prüfungen bestanden,
   **1** = mindestens eine Prüfung fehlgeschlagen, nichts zu prüfen
   oder kein Prüfwerkzeug verfügbar.

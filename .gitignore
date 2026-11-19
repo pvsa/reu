@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Ausgaben (werden zur Laufzeit erzeugt)
+out/final/*
+out/dry-run/*
+!out/final/.gitkeep
+!out/dry-run/.gitkeep
+
+# Persönliche User-Dateien NICHT einchecken:
+# In conf/ gehören NUR die Beispiel-Dateien ins Repo, alles andere
+# (philipp.conf, philipp-kunden.ods, reale Monats-ODSen etc.) bleibt lokal.
+conf/*
+!conf/alice.conf
+!conf/alice-kunden.ods
+!conf/auslagen_2025-11.ods
+
+# LEGACY-Persistenter State (pro User, nicht einchecken) – zusätzlich zu conf/*;
+# Rechnungsliste lebt jetzt im Blatt 'Rechnungen' der <user>-kunden.ods,
+# eine alte state.json wird einmalig dorthin importiert (*.importiert).
+conf/*.state.json
+conf/*.state.json.importiert
+
+# Logo: lokales pilarkto.net-Logo, nicht für das öffentliche Repo
+logo.jpg
+*.jpg
+!conf/*.jpg

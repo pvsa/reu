@@ -1,0 +1,10 @@
+# REU – Python-Abhängigkeiten
+#
+# drafthorse 2.2 bis 2025.x werden unterstützt (siehe README,
+# Abschnitt Installation); 1.x nutzt die inkompatible ZUGFeRD-1.0-API.
+# lxml und pypdf kommen transitiv über drafthorse mit.
+drafthorse>=2.2
+reportlab
+requests
+icalendar
+pytz
